@@ -1,3 +1,4 @@
+import {seal,unseal} from '../security/secrets';
 import { createHash } from 'node:crypto';
 import type { Ctx } from '../context';
 
@@ -45,7 +46,7 @@ export async function imageTaggedJson(ctx: Ctx, body: unknown, replacer: (key: s
       await ctx.env.DB.prepare(`INSERT INTO image_tags(tag,url,created)
         SELECT json_extract(value,'$[0]'),json_extract(value,'$[1]'),? FROM json_each(?) WHERE 1
         ON CONFLICT(tag) DO NOTHING`)
-        .bind(now, JSON.stringify(rows)).run();
+        .bind(now, JSON.stringify(await Promise.all(rows.map(async([tag,url])=>[tag,await seal(url,ctx.env,`image-tag:${tag}`)])))).run();
       for (const [tag] of rows) {
         if (known.size >= 4096) known.delete(known.keys().next().value!);
         known.set(tag, now + 3600_000);
@@ -59,5 +60,6 @@ export async function imageUrlByTag(ctx: Ctx, tag: string | undefined): Promise<
   if (!tag || !/^[a-f0-9]{32}$/i.test(tag)) return null;
   const row = await ctx.env.DB?.prepare('SELECT url FROM image_tags WHERE tag=? UNION ALL SELECT value FROM state WHERE key=? AND expires>? LIMIT 1')
     .bind(tag.toLowerCase(), mappingKey(ctx, tag.toLowerCase()), Date.now()).first<{url: string}>();
-  return row && /^https?:\/\//i.test(row.url) ? row.url : null;
+  if(!row||!row.url.startsWith('e1.'))return null;
+  const url=await unseal(row.url,ctx.env,`image-tag:${tag.toLowerCase()}`);return /^https?:\/\//i.test(url)?url:null;
 }

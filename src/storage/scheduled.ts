@@ -1,6 +1,6 @@
 import type { Env } from '../env';
 import type { Ctx } from '../context';
-import { decodeConfig } from '../config/codec';
+import { loadConfig,storeConfig,migrateSecrets } from '../security/secrets';
 import { drainTracking, trackerApi } from '../trackers/index';
 import { loadSnapshot } from './snapshots';
 import { advanceBulk } from './bulk';
@@ -10,7 +10,6 @@ import { syncMovieLens } from '../addon/movielens-sync';
 import { advanceRecommendations } from './recommendation-jobs';
 import { ensureSchema } from './migrate';
 import { backOffImport, historyImportKey, importSnapshot } from './imported-history';
-import { dailyUpdate } from './updates';
 import { drainPlaybackReports } from '../jellyfin/reports';
 
 const dueAccounts=`WHERE sync_after<=?
@@ -22,21 +21,21 @@ const dueAccounts=`WHERE sync_after<=?
 export async function hasScheduledWork(env:Env,now:number):Promise<boolean> {
   if(!env.DB)return false;
   await ensureSchema(env.DB);
+  await migrateSecrets(env);
   return Boolean(await env.DB.prepare(`SELECT 1 FROM accounts ${dueAccounts} LIMIT 1`).bind(now,now,now,now).first());
 }
 
 export async function scheduled(event: ScheduledController, env: Env): Promise<void> {
   if (!env.DB) throw new Error('Scheduled synchronization requires DB');
   await ensureSchema(env.DB);
-  try { await dailyUpdate(event, env); }
-  catch { console.warn('Daily Rill update failed. Check the Deploy Hook in Rill update settings.'); }
+  await migrateSecrets(env);
   const db=budgetDatabase(env.DB,env.D1_QUERY_BUDGET==='1000'?1000:50);
   env={...env,DB:db};
   const now = Date.now();
   const accounts = await db.prepare(`SELECT scope,config,origin,sync_after FROM accounts ${dueAccounts} ORDER BY processed_at,scope LIMIT 1`)
     .bind(now,now,now,now).all<{scope:string;config:string;origin:string;sync_after:number}>();
   for (const a of accounts.results) {
-    const cfg = await decodeConfig(a.config);
+    const cfg = await loadConfig(a.config,env,a.scope);
     if (!cfg) continue;
     const ctx: Ctx = {cfg,env,cfgToken:a.config,scope:a.scope,cacheRevision:(await sha256(JSON.stringify(cfg))).slice(0,16),origin:a.origin,lang:cfg.language.slice(0,2).toLowerCase(),tmdbKey:cfg.keys.tmdb || env.TMDB_KEY};
     try {
@@ -65,9 +64,11 @@ export async function scheduled(event: ScheduledController, env: Env): Promise<v
     } catch(error) { if(!(error instanceof DatabaseBudgetExceeded)) console.warn('Account synchronization failed'); }
   }
   const daily=Math.floor(event.scheduledTime/60_000)%1440===0;
-  if(!hasDatabaseBudget(db,daily?5:3)) return;
+  if(!hasDatabaseBudget(db,daily?7:5)) return;
   await db.batch([
     db.prepare('DELETE FROM state WHERE expires<=?').bind(now),
+    db.prepare('DELETE FROM login_limits WHERE window_start<?').bind(now-86400000),
+    db.prepare('DELETE FROM helper_limits WHERE window_start<?').bind(now-86400000),
     db.prepare("DELETE FROM deliveries WHERE status IN ('done','superseded') AND due<?").bind(now-30*86400_000),
     db.prepare("DELETE FROM bulk_actions WHERE status IN ('done','cancelled') AND created<?").bind(now-30*86400_000),
     ...(daily?[

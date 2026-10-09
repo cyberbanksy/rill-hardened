@@ -5,3 +5,5 @@ node_modules
 .DS_Store
 .rill-build
 output/
+
+.rill-ready.json

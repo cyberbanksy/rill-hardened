@@ -86,7 +86,7 @@ export async function syncMovieLens(ctx:Ctx,manual=false):Promise<MovieLensSyncS
     const status:MovieLensSyncStatus={checkedAt:new Date().toISOString(),nextAt:now+86400_000,fingerprint,sent:fingerprint===previous?.fingerprint?0:rows.length,...result};
     await statePut(ctx,key,status,365*86400);return status;
   }catch(error){
-    await statePut({...ctx,env:{...ctx.env,DB:cleanupDatabase(db)}},key,{...previous,checkedAt:new Date().toISOString(),nextAt:now+3600_000,sent:0,error:error instanceof Error?error.message:'MovieLens import failed'},365*86400);
+    await statePut({...ctx,env:{...ctx.env,DB:cleanupDatabase(db)}},key,{...previous,checkedAt:new Date().toISOString(),nextAt:now+3600_000,sent:0,error:'MovieLens import failed'},365*86400);
     throw error;
   }finally{await cleanupDatabase(db).prepare('DELETE FROM state WHERE key=? AND value=?').bind(lock,owner).run();}
 }

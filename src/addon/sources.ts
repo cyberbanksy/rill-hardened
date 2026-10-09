@@ -1,3 +1,5 @@
+import {limitedJson,limitedText} from '../security/limits';
+import {safeFetch,addonHttpAllowed} from '../security/outbound';
 import type { Ctx } from '../context';
 import type { ContentType, MetaPreview } from '../stremio/types';
 import type { CatalogDefinition, CatalogExtra } from './catalogs';
@@ -53,7 +55,7 @@ export async function letterboxdReference(raw: string): Promise<{ id: string; wa
   if (!watchlist && (parts[1] !== 'list' || !parts[2])) throw new Error('Use a Letterboxd list or watchlist URL');
   const page = watchlist ? `https://letterboxd.com/${encodeURIComponent(parts[0])}/` : url.href;
   return memo(`letterboxd:identifier:${page}`,86400,async () => {
-    const r = await fetch(page,{headers:{accept:'text/html'},signal:AbortSignal.timeout(15000)});
+    const r = await safeFetch(page,{headers:{accept:'text/html'},signal:AbortSignal.timeout(15000)});
     const id = r.headers.get('x-letterboxd-identifier');
     await r.body?.cancel();
     if (!r.ok || !id || !/^[\w-]+$/.test(id)) throw new Error('Letterboxd did not provide a list identifier; enter its identifier directly');
@@ -80,7 +82,7 @@ export async function sourceDefinitions(ctx: Ctx): Promise<CatalogDefinition[]> 
       for (const type of ['movie','series'] as const) if (list.entities?.some(e=>type==='movie' ? e.movieId : e.seriesId)) out.push({id:`tvdb.list.${list.id}`,type,name:list.name || `TVDB ${list.id}`,group:'TVDB lists',extra});
     }
   }
-  for (const [i,ref] of (ctx.cfg.lists.letterboxd ?? []).entries()) {
+  for (const [i,ref] of (ctx.cfg.thirdParty?.letterboxd ? ctx.cfg.lists.letterboxd ?? [] : []).entries()) {
     const data = await letterList(ref).catch(()=>null);
     for (const type of ['movie','series'] as const) {
       if (type==='series' && !data?.data?.items?.some(r=>r.type==='show')) continue;
@@ -116,6 +118,7 @@ export async function sourceItems(ctx: Ctx, type: ContentType, id: string, query
   }
   if (id.startsWith('movielens.')) return movieLensItems(ctx,type,id,query);
   if (id.startsWith('letterboxd.')) {
+    if(!ctx.cfg.thirdParty?.letterboxd)return [];
     const ref = ctx.cfg.lists.letterboxd?.[Number(id.slice(11))];
     if (!ref) return [];
     const data = await letterList(ref);

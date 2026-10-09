@@ -1,6 +1,6 @@
 import type { Ctx } from '../context';
 import type { Env } from '../env';
-import { decodeConfig } from '../config/codec';
+import { loadConfig,seal,unseal } from '../security/secrets';
 import { sha256 } from '../util/bytes';
 import { decodeGuid, plainGuid } from './ids';
 import { titleItem, PREVIEW_PEOPLE_LIMIT, type Dto } from './dto';
@@ -61,7 +61,7 @@ export async function presentTitles(ctx: Ctx, items: Dto[]): Promise<void> {
     const found = new Set<string>();
     for (const row of rows.results) {
       found.add(row.key);
-      const data = JSON.parse(row.value) as Dto | null;
+      const data = JSON.parse(row.value==='null'?'null':await unseal(row.value,ctx.env,`presentation:${row.key}`)) as Dto | null;
       if (data) for (const item of byKey.get(row.key) ?? []) apply(item, data);
     }
     missing.push(...page.filter(key => !found.has(key)));
@@ -98,7 +98,7 @@ export async function preparePresentation(job: PresentationJob, env: Env): Promi
   if (!env.DB) return;
   const saved = await env.DB.prepare('SELECT config,origin FROM accounts WHERE scope=?')
     .bind(job.scope).first<{config: string; origin: string}>();
-  const cfg = saved ? await decodeConfig(saved.config) : null;
+  const cfg = saved ? await loadConfig(saved.config,env,job.scope) : null;
   if (!cfg || !saved) return;
   const revision = (await sha256(JSON.stringify(cfg))).slice(0, 16);
   // Ignore jobs for replaced settings or deleted profiles, never cache their metadata.
@@ -116,5 +116,5 @@ export async function preparePresentation(job: PresentationJob, env: Env): Promi
   // Large series can have hundreds of crew credits. Keep homepage payloads bounded.
   data.People = (item.People as Dto[]).slice(0, PREVIEW_PEOPLE_LIMIT);
   await env.DB.prepare('INSERT INTO presentations(key,value,expires) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,expires=excluded.expires')
-    .bind(keyOf(ctx, job.id), JSON.stringify(data), Date.now() + TTL).run();
+    .bind(keyOf(ctx, job.id), await seal(JSON.stringify(data),env,`presentation:${keyOf(ctx,job.id)}`), Date.now() + TTL).run();
 }

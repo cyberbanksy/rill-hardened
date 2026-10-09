@@ -1,3 +1,5 @@
+import {registerAccount} from '../storage/state';
+import {safeFetch,addonHttpAllowed} from '../security/outbound';
 import { Hono } from 'hono';
 import type { Ctx } from '../context';
 import type { Env } from '../env';
@@ -13,9 +15,13 @@ import { queueRecommendations,recommendationJob } from '../storage/recommendatio
 import { syncMovieLens,movieLensSyncStatus,importRatingsCsv } from '../addon/movielens-sync';
 import { aiCatalog } from '../addon/ai';
 import { tmdbGet } from '../meta/tmdb';
-import { mountAccountRoutes } from './account';
+import {mountAccountRoutes,ownerSession,ownerConfig} from './account';
+import {helperQuota,readOwner} from '../security/auth';
+import {mergePrivate,publicConfig,addonReference,SAVED} from '../security/secrets';
+import {addonCapability} from '../security/capability';
+import {limitedJson} from '../security/limits';
 
-export const uiRouter = new Hono<{ Variables: { ctx?: Ctx }; Bindings: Env }>();
+export const uiRouter = new Hono<{ Variables: { ctx?: Ctx; ownerCfg: RillConfig }; Bindings: Env }>();
 
 const TRAKT_API = 'https://api.trakt.tv';
 const SIMKL_API = 'https://api.simkl.com';
@@ -26,7 +32,7 @@ type Json = Record<string, unknown>;
 
 async function readBody(req: Request): Promise<Json> {
   try {
-    const data: unknown = await req.json();
+    const data: unknown = await limitedJson(req,262144);
     return data && typeof data === 'object' && !Array.isArray(data) ? (data as Json) : {};
   } catch {
     return {};
@@ -42,10 +48,10 @@ async function upstream(url: string, init: RequestInit = {}): Promise<{ status: 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), UPSTREAM_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { ...init, signal: ctrl.signal });
+    const res = await safeFetch(url, { ...init, signal: ctrl.signal });
     let data: Json | null = null;
     try {
-      const parsed: unknown = await res.json();
+      const parsed: unknown = await limitedJson(res);
       data = parsed && typeof parsed === 'object' ? (parsed as Json) : null;
     } catch {
       data = null;
@@ -93,7 +99,9 @@ async function tokenFromInput(input: string): Promise<{ token: string; config: R
 }
 
 async function buildCtx(cfg: RillConfig, env: Env | undefined, origin: string): Promise<Ctx> {
-  const cfgToken = await encodeConfig(cfg);
+  const owner=env?await readOwner(env):null;
+  if(owner)cfg.installationKey=owner.installation_key;
+  const cfgToken = '';
   const scope = (await sha256(cfg.installationKey||cfgToken)).slice(0,cfg.installationKey?32:16);
   return {
     cfg,
@@ -118,30 +126,27 @@ uiRouter.get('/logo.svg', (c) => {
 uiRouter.get('/wordmark.svg', (c) => c.body(BRAND_WORDMARK, 200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'public, max-age=86400' }));
 uiRouter.get('/favicon.svg', (c) => c.body(BRAND_ICON, 200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'public, max-age=86400' }));
 
-uiRouter.use('/api/*', async (c, next) => {
-  await next();
-  c.header('Cache-Control', 'no-store');
+uiRouter.use('/api/*',async(c,next)=>{
+ c.header('Cache-Control','no-store');
+ if(c.req.header('origin')!==new URL(c.req.url).origin)return c.json({error:'Same-origin requests required.'},403);
+ if(!c.req.header('content-type')?.toLowerCase().startsWith('application/json'))return c.json({error:'JSON required.'},415);
+ if(c.req.path.startsWith('/api/account/'))return next();
+ const owner=await ownerSession(c.env,c.req.raw);if(!owner)return c.json({error:'Sign in first.'},401);
+ const cfg=await ownerConfig(c.env,owner);if(!cfg)return c.json({error:'Save server settings first.'},409);
+ const scope=(await sha256(owner.installation_key)).slice(0,32);
+ if(!await helperQuota(c.env,scope,'helpers'))return c.json({error:'Try again later.'},429);
+ if(/recommendations\/generate|catalogs\/generate|movielens\/(sync|import)/.test(c.req.path)&&!await helperQuota(c.env,scope,'expensive',2,3600000))return c.json({error:'Hourly work quota reached.'},429);
+ c.set('ownerCfg',cfg);await next();
 });
 
 mountAccountRoutes(uiRouter, buildCtx);
 
-uiRouter.post('/api/config/encode', async (c) => {
-  const body = await readBody(c.req.raw);
-  const cfg = normalizeConfig(body);
-  const token = await encodeConfig(cfg);
-  return c.json({ token });
-});
-
-uiRouter.post('/api/config/decode', async (c) => {
-  const body = await readBody(c.req.raw);
-  const found = await tokenFromInput(field(body, 'input'));
-  if (!found) return c.json({ error: 'Not a valid config token or install URL.' }, 400);
-  return c.json({ config: found.config, token: found.token });
-});
+uiRouter.post('/api/config/encode',async c=>c.json({token:await addonCapability(await buildCtx(c.get('ownerCfg'),c.env,new URL(c.req.url).origin))}));
+uiRouter.post('/api/config/decode',async c=>c.json({error:'Legacy credential-bearing imports are disabled. Use server settings.'},410));
 
 uiRouter.post('/api/catalogs', async (c) => {
   const body = await readBody(c.req.raw);
-  const cfg = normalizeConfig(body);
+  const cfg = mergePrivate(body,c.get('ownerCfg'));
   const origin = new URL(c.req.url).origin;
   try {
     const ctx = await buildCtx(cfg, c.env, origin);
@@ -153,7 +158,7 @@ uiRouter.post('/api/catalogs', async (c) => {
 });
 
 uiRouter.post('/api/recommendations/generate',async c=>{
-  const body=await readBody(c.req.raw),cfg=normalizeConfig(body.config??body);
+  const body=await readBody(c.req.raw),cfg=mergePrivate(body.config??body,c.get('ownerCfg'));
   if(!cfg.recommendations?.enabled||!cfg.recommendations.apiKey||!cfg.recommendations.model)return c.json({error:'Enable recommendations and enter the model and API key first.'},400);
   if(!c.env.DB)return c.json({error:'Connect durable storage before generating recommendations.'},503);
   const ctx=await buildCtx(cfg,c.env,new URL(c.req.url).origin);
@@ -164,14 +169,14 @@ uiRouter.post('/api/recommendations/generate',async c=>{
 });
 
 uiRouter.post('/api/recommendations/status',async c=>{
-  const body=await readBody(c.req.raw),cfg=normalizeConfig(body.config??body);
+  const body=await readBody(c.req.raw),cfg=mergePrivate(body.config??body,c.get('ownerCfg'));
   const ctx=await buildCtx(cfg,c.env,new URL(c.req.url).origin);
   if(!ctx.env.DB)return c.json({error:'Connect durable storage first.'},503);
   return c.json({job:await recommendationJob(ctx,field(body,'id')||undefined)});
 });
 
 uiRouter.post('/api/movielens/:action',async c=>{
-  const body=await readBody(c.req.raw),cfg=normalizeConfig(body.config??body);
+  const body=await readBody(c.req.raw),cfg=mergePrivate(body.config??body,c.get('ownerCfg'));
   const ctx=await buildCtx(cfg,c.env,new URL(c.req.url).origin);
   if(!cfg.movieLens?.username||!cfg.movieLens.password)return c.json({error:'Connect MovieLens first.'},400);
   try {
@@ -179,18 +184,18 @@ uiRouter.post('/api/movielens/:action',async c=>{
     if(c.req.param('action')==='sync')return c.json({status:await syncMovieLens(ctx,true)});
     if(c.req.param('action')==='import')return c.json({status:await importRatingsCsv(ctx,field(body,'csv'))});
     return c.json({error:'Unknown MovieLens action.'},404);
-  }catch(error){return c.json({error:error instanceof Error?error.message:'MovieLens import failed.'},502);}
+  }catch(error){return c.json({error:'MovieLens import failed.'},502);}
 });
 
 uiRouter.post('/api/catalogs/generate',async c=>{
-  const body=await readBody(c.req.raw),cfg=normalizeConfig(body.config);
+  const body=await readBody(c.req.raw),cfg=mergePrivate(body.config,c.get('ownerCfg'));
   try{return c.json({catalog:await aiCatalog(await buildCtx(cfg,c.env,new URL(c.req.url).origin),field(body,'query'),field(body,'provider'),field(body,'type'))});}
-  catch(error){return c.json({error:error instanceof Error?error.message:'The catalog could not be generated.'},400);}
+  catch(error){return c.json({error:'The catalog could not be generated.'},400);}
 });
 
 uiRouter.post('/api/people/search', async (c) => {
   const body = await readBody(c.req.raw);
-  const cfg = normalizeConfig(body.config);
+  const cfg = mergePrivate(body.config,c.get('ownerCfg'));
   const query = field(body, 'query').trim();
   if (!query) return c.json({ people: [] });
   try {
@@ -212,8 +217,8 @@ uiRouter.post('/api/collections/import', async (c) => {
     const text = raw.trim();
     if (/^https?:\/\//i.test(text)) {
       try {
-        const res = await fetch(text, { headers: { accept: 'application/json' } });
-        raw = res.ok ? await res.json() : null;
+        const res = await safeFetch(text, { headers: { accept: 'application/json' } });
+        raw = res.ok ? await limitedJson(res) : null;
       } catch {
         raw = null;
       }
@@ -236,7 +241,7 @@ uiRouter.post('/api/collections/import', async (c) => {
 
 uiRouter.post('/api/franchises/search', async (c) => {
   const body = await readBody(c.req.raw);
-  const cfg = normalizeConfig(body.config);
+  const cfg = mergePrivate(body.config,c.get('ownerCfg'));
   const query = field(body, 'query').trim();
   if (!query) return c.json({ franchises: [] });
   try {
@@ -251,7 +256,7 @@ uiRouter.post('/api/franchises/search', async (c) => {
 
 uiRouter.post('/api/probe', async (c) => {
   const body = await readBody(c.req.raw);
-  const url = field(body, 'url');
+  const url = addonReference(field(body,'url'),c.get('ownerCfg'));
   if (!url) return c.json({ error: 'Missing url.' }, 400);
   const manifest = await getManifest(url);
   if (!manifest) return c.json({ error: 'No manifest found at that address.' }, 502);
@@ -299,7 +304,7 @@ uiRouter.post('/api/oauth/trakt/device', async (c) => {
 uiRouter.post('/api/oauth/trakt/token', async (c) => {
   const body = await readBody(c.req.raw);
   const clientId = field(body, 'clientId');
-  const clientSecret = field(body, 'clientSecret');
+  const clientSecret = field(body,'clientSecret')===SAVED||!field(body,'clientSecret')?c.get('ownerCfg').trackers.trakt?.clientSecret??'':field(body,'clientSecret');
   const deviceCode = field(body, 'deviceCode');
   if (!clientId || !clientSecret || !deviceCode) return c.json({ error: 'Missing clientId, clientSecret or deviceCode.' }, 400);
   const r = await upstream(`${TRAKT_API}/oauth/device/token`, {
@@ -321,19 +326,16 @@ uiRouter.post('/api/oauth/trakt/token', async (c) => {
   const me = await upstream(`${TRAKT_API}/users/settings`, { headers: traktHeaders(clientId, accessToken) });
   const user = me.data?.user;
   if (user && typeof user === 'object' && typeof (user as Json).username === 'string') username = (user as Json).username as string;
-  return c.json({
-    accessToken,
-    refreshToken: typeof r.data.refresh_token === 'string' ? r.data.refresh_token : undefined,
-    expiresAt: expiryFrom(r.data.expires_in),
-    username,
-  });
+  const cfg=c.get('ownerCfg');cfg.trackers.trakt={clientId,clientSecret,accessToken,refreshToken:typeof r.data.refresh_token==='string'?r.data.refresh_token:undefined,expiresAt:expiryFrom(r.data.expires_in),username};
+  await registerAccount(await buildCtx(cfg,c.env,new URL(c.req.url).origin),true);
+  return c.json({...publicConfig(cfg).trackers.trakt});
 });
 
 uiRouter.post('/api/oauth/trakt/refresh', async (c) => {
   const body = await readBody(c.req.raw);
   const clientId = field(body, 'clientId');
-  const clientSecret = field(body, 'clientSecret');
-  const refreshToken = field(body, 'refreshToken');
+  const clientSecret = field(body,'clientSecret')===SAVED||!field(body,'clientSecret')?c.get('ownerCfg').trackers.trakt?.clientSecret??'':field(body,'clientSecret');
+  const refreshToken = field(body,'refreshToken')===SAVED||!field(body,'refreshToken')?c.get('ownerCfg').trackers.trakt?.refreshToken??'':field(body,'refreshToken');
   if (!clientId || !clientSecret || !refreshToken) return c.json({ error: 'Missing clientId, clientSecret or refreshToken.' }, 400);
   const r = await upstream(`${TRAKT_API}/oauth/token`, {
     method: 'POST',
@@ -349,11 +351,9 @@ uiRouter.post('/api/oauth/trakt/refresh', async (c) => {
   if (r.status !== 200 || !r.data || typeof r.data.access_token !== 'string') {
     return c.json({ error: `Trakt refused the refresh (${r.status || 'network'}).` }, 502);
   }
-  return c.json({
-    accessToken: r.data.access_token,
-    refreshToken: typeof r.data.refresh_token === 'string' ? r.data.refresh_token : refreshToken,
-    expiresAt: expiryFrom(r.data.expires_in),
-  });
+  const cfg=c.get('ownerCfg');cfg.trackers.trakt={...cfg.trackers.trakt!,clientId,clientSecret,accessToken:r.data.access_token,refreshToken:typeof r.data.refresh_token==='string'?r.data.refresh_token:refreshToken,expiresAt:expiryFrom(r.data.expires_in)};
+  await registerAccount(await buildCtx(cfg,c.env,new URL(c.req.url).origin),true);
+  return c.json({...publicConfig(cfg).trackers.trakt});
 });
 
 uiRouter.post('/api/oauth/simkl/pin', async (c) => {
@@ -383,7 +383,7 @@ uiRouter.post('/api/oauth/simkl/poll', async (c) => {
   const q = new URLSearchParams({ client_id: clientId });
   const r = await upstream(`${SIMKL_API}/oauth/pin/${encodeURIComponent(userCode)}?${q}`, { headers: { 'simkl-api-key': clientId } });
   if (r.status === 200 && r.data?.result === 'OK' && typeof r.data.access_token === 'string') {
-    return c.json({ accessToken: r.data.access_token });
+    const cfg=c.get('ownerCfg');cfg.trackers.simkl={clientId,accessToken:r.data.access_token};await registerAccount(await buildCtx(cfg,c.env,new URL(c.req.url).origin),true);return c.json({...publicConfig(cfg).trackers.simkl});
   }
   const message = typeof r.data?.message === 'string' ? r.data.message.toLowerCase() : '';
   if (message.includes('slow')) return c.json({ pending: true, slowDown: true });
@@ -408,7 +408,7 @@ uiRouter.post('/api/oauth/mal/token', async (c) => {
     code,
     code_verifier: verifier,
   });
-  const clientSecret = field(body, 'clientSecret');
+  const clientSecret = field(body,'clientSecret')===SAVED||!field(body,'clientSecret')?c.get('ownerCfg').trackers.mal?.clientSecret??'':field(body,'clientSecret');
   if (clientSecret) form.set('client_secret', clientSecret);
   const redirectUri = field(body, 'redirectUri');
   if (redirectUri) form.set('redirect_uri', redirectUri);
@@ -418,12 +418,20 @@ uiRouter.post('/api/oauth/mal/token', async (c) => {
     body: form.toString(),
   });
   if (r.status !== 200 || !r.data || typeof r.data.access_token !== 'string') {
-    const why = typeof r.data?.error === 'string' ? r.data.error : String(r.status || 'network');
+    const why=String(r.status||'network');
     return c.json({ error: `MyAnimeList refused the code (${why}).` }, 502);
   }
-  return c.json({
-    accessToken: r.data.access_token,
-    refreshToken: typeof r.data.refresh_token === 'string' ? r.data.refresh_token : undefined,
-    expiresAt: expiryFrom(r.data.expires_in),
-  });
+  const cfg=c.get('ownerCfg');cfg.trackers.mal={clientId,clientSecret,accessToken:r.data.access_token,refreshToken:typeof r.data.refresh_token==='string'?r.data.refresh_token:undefined,expiresAt:expiryFrom(r.data.expires_in)};
+  await registerAccount(await buildCtx(cfg,c.env,new URL(c.req.url).origin),true);
+  return c.json({...publicConfig(cfg).trackers.mal});
+});
+
+uiRouter.post('/api/tracking/status',async c=>{
+ const cfg=c.get('ownerCfg'),scope=(await sha256(cfg.installationKey!)).slice(0,32);
+ const rows=await c.env.DB!.prepare("SELECT service,status,count(*) AS count FROM deliveries WHERE scope=? AND status IN ('pending','failed') GROUP BY service,status").bind(scope).all<{service:string;status:string;count:number}>();
+ return c.json({durable:true,pending:rows.results.filter(r=>r.status==='pending').reduce((s,r)=>s+r.count,0),failed:rows.results.filter(r=>r.status==='failed').reduce((s,r)=>s+r.count,0),services:rows.results});
+});
+uiRouter.post('/api/tracking/retry',async c=>{
+ const scope=(await sha256(c.get('ownerCfg').installationKey!)).slice(0,32);
+ const result=await c.env.DB!.prepare("UPDATE deliveries SET status='pending',attempts=0,due=? WHERE scope=? AND status='failed'").bind(Date.now(),scope).run();return c.json({queued:result.meta.changes});
 });

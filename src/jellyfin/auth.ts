@@ -1,3 +1,5 @@
+import {seal} from '../security/secrets';
+import {generation,readOwner,verifyPassword} from '../security/auth';
 import type { Ctx } from '../context';
 import { b64urlDecode, b64urlEncode, hmac, sha256, timingSafeEqual } from '../util/bytes';
 import { stateDelete, stateGet, statePut } from '../storage/state';
@@ -11,6 +13,7 @@ export interface ClientInfo {
 
 export interface TokenClaims {
   u: string;
+  g: number;
   jti?: string;
   p?: string;
   d: string;
@@ -55,23 +58,22 @@ export function tokenOf(req: Request): string {
 
 const SIGNING_KEY = "install:signing-key";
 const FOREVER = 100 * 365 * 86400;
-let installKey: string | undefined;
+const installKeys=new WeakMap<D1Database,string>();
 
 export async function signingSecret(ctx: Ctx): Promise<string> {
   const fromEnv = ctx.env?.RILL_SECRET?.trim();
   if (fromEnv) return fromEnv;
   if (ctx.env.DB) {
-    if (installKey) return installKey;
+    const cached=installKeys.get(ctx.env.DB);if(cached)return cached;
     const fresh = b64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
-    await ctx.env.DB.prepare("INSERT OR IGNORE INTO state(key,value,expires) VALUES(?,?,?)").bind(SIGNING_KEY, JSON.stringify(fresh), Date.now() + FOREVER * 1000).run();
-    installKey = (await stateGet<string>(ctx, SIGNING_KEY)) ?? fresh;
-    return installKey;
+    await ctx.env.DB.prepare("INSERT OR IGNORE INTO state(key,value,expires) VALUES(?,?,?)").bind(SIGNING_KEY, await seal(JSON.stringify(fresh),ctx.env,`state:${SIGNING_KEY}`), Date.now() + FOREVER * 1000).run();
+    const stored=(await stateGet<string>(ctx,SIGNING_KEY))??fresh;installKeys.set(ctx.env.DB,stored);return stored;
   }
   return sha256(`rill:${ctx.cfg.jellyfin.username}:${ctx.cfg.jellyfin.password}`);
 }
 
 export async function mintToken(ctx: Ctx, userId: string, deviceId: string): Promise<string> {
-  const claims: TokenClaims = { jti: crypto.randomUUID(), p: ctx.profile?.id, u: userId, d: deviceId, iat: Math.floor(Date.now() / 1000), s: ctx.scope };
+  const claims: TokenClaims = { g:await generation(ctx.env), jti: crypto.randomUUID(), p: ctx.profile?.id, u: userId, d: deviceId, iat: Math.floor(Date.now() / 1000), s: ctx.scope };
   if (ctx.env.DB) await statePut(ctx, `token:${ctx.scope}:${claims.jti}`, true, 30 * 86400);
   const payload = b64urlEncode(new TextEncoder().encode(JSON.stringify(claims)));
   const sig = await hmac(await signingSecret(ctx), payload);
@@ -79,6 +81,7 @@ export async function mintToken(ctx: Ctx, userId: string, deviceId: string): Pro
 }
 
 export async function verifyToken(ctx: Ctx, token: string): Promise<TokenClaims | null> {
+  if(token.length>4096)return null;
   const dot = token.indexOf('.');
   if (dot <= 0) return null;
   const payload = token.slice(0, dot);
@@ -88,7 +91,7 @@ export async function verifyToken(ctx: Ctx, token: string): Promise<TokenClaims 
     const expected = await hmac(await signingSecret(ctx), payload);
     if (!timingSafeEqual(expected, sig)) return null;
     const claims = JSON.parse(new TextDecoder().decode(b64urlDecode(payload))) as TokenClaims;
-    if (!claims || typeof claims.u !== 'string' || claims.s !== ctx.scope) return null;
+    if (!claims || claims.g !== await generation(ctx.env) || typeof claims.u !== 'string' || claims.s !== ctx.scope) return null;
     if (!Number.isFinite(claims.iat) || claims.iat > Date.now()/1000+60 || claims.iat < Date.now()/1000-30*86400) return null;
     if (ctx.env.DB && (!claims.jti || !await stateGet(ctx, `token:${ctx.scope}:${claims.jti}`))) return null;
     return claims;
@@ -97,13 +100,10 @@ export async function verifyToken(ctx: Ctx, token: string): Promise<TokenClaims 
   }
 }
 
-export function credentialsMatch(ctx: Ctx, username: unknown, password: unknown): boolean {
-  const wantUser = ctx.cfg.jellyfin.username.trim().toLowerCase();
-  const gotUser = String(username ?? '').trim().toLowerCase();
-  if (wantUser && gotUser !== wantUser) return false;
-  const wantPw = ctx.cfg.jellyfin.password;
-  if (!wantPw) return true;
-  return timingSafeEqual(wantPw, String(password ?? ''));
+export async function credentialsMatch(ctx:Ctx,username:unknown,password:unknown):Promise<boolean> {
+ const owner=await readOwner(ctx.env);if(!owner)return false;
+ const got=String(username??'').trim().toLowerCase();
+ return got===ctx.cfg.jellyfin.username.trim().toLowerCase()&&await verifyPassword(owner,password);
 }
 
 export interface Identity {
@@ -120,6 +120,7 @@ const QC_TTL = 10 * 60;
 
 export interface QuickConnectRecord {
   secret: string;
+  generation: number;
   code: string;
   client: ClientInfo;
   dateAdded: string;
@@ -146,6 +147,7 @@ export async function startQuickConnect(ctx: Ctx, client: ClientInfo): Promise<Q
   const digits = new Uint32Array(1);
   crypto.getRandomValues(digits);
   const rec: QuickConnectRecord = {
+    generation:await generation(ctx.env),
     secret: randomHex(24),
     code: String(digits[0] % 1_000_000).padStart(6, '0'),
     client,
@@ -193,6 +195,7 @@ export async function claimQuickConnect(ctx: Ctx, secret: string): Promise<Quick
     const row = await ctx.env.DB.prepare("DELETE FROM state WHERE key=? AND expires>? AND json_extract(value,'$.authenticated')=1 RETURNING value").bind(secretKey(ctx,secret.toLowerCase()),Date.now()).first<{value:string}>();
     if (!row) return null;
     const rec = JSON.parse(row.value) as QuickConnectRecord;
+    if(rec.generation!==await generation(ctx.env))return null;
     await stateDelete(ctx,codeKey(ctx,rec.code));
     return rec;
   }

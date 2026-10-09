@@ -1,3 +1,9 @@
+# Two secrets the hardened build needs. The Deploy to Cloudflare page asks for both.
+# RILL_DATA_KEY encrypts saved add-on keys: 32 random bytes in base64. Run `openssl rand -base64 32`.
+# Keep a copy somewhere safe; if it changes, saved add-on keys can't be read anymore.
+RILL_DATA_KEY=
+# RILL_SETUP_TOKEN is a one-time code that proves you own a new install. Run `openssl rand -hex 16`.
+RILL_SETUP_TOKEN=
 # Optional. Rill generates its own signing key when this is absent.
 # RILL_SECRET=
 # TMDB_KEY=

@@ -1,3 +1,6 @@
+import {seal,unseal} from '../security/secrets';
+import {limitedJson,limitedText} from '../security/limits';
+import {safeFetch,addonHttpAllowed} from '../security/outbound';
 import type { Ctx } from '../context';
 import type { ContentType, MetaPreview } from '../stremio/types';
 import type { CatalogDefinition, CatalogExtra } from './catalogs';
@@ -16,21 +19,21 @@ async function session(ctx:Ctx):Promise<string> {
   const auth=ctx.cfg.movieLens;
   if (!auth?.username || !auth.password) throw new Error('Connect MovieLens first');
   const key=await sessionKey(ctx),saved=await stateGet<string>(ctx,key);
-  if (saved) return saved;
-  const r=await fetch(`${API}/sessions`,{method:'POST',headers:{'content-type':'application/json;charset=utf-8',accept:'application/json',referer:'https://movielens.org/login'},body:JSON.stringify({userName:auth.username,password:auth.password}),signal:AbortSignal.timeout(15000)});
+  if (saved) return unseal(saved,ctx.env,key);
+  const r=await safeFetch(`${API}/sessions`,{method:'POST',headers:{'content-type':'application/json;charset=utf-8',accept:'application/json',referer:'https://movielens.org/login'},body:JSON.stringify({userName:auth.username,password:auth.password}),signal:AbortSignal.timeout(15000)});
   const cookie=r.headers.getSetCookie().map(c=>c.split(';')[0]).join('; ');
   await r.body?.cancel();
   if (!r.ok || !cookie) throw new Error('MovieLens rejected the connection');
-  await statePut(ctx,key,cookie,86400);
+  await statePut(ctx,key,await seal(cookie,ctx.env,key),86400);
   return cookie;
 }
 export async function movieLensRead<T>(ctx:Ctx,path:string,init:RequestInit={}):Promise<T> {
   for(let attempt=0;attempt<2;attempt++) {
     const headers=new Headers(init.headers);headers.set('accept','application/json');headers.set('cookie',await session(ctx));
-    const r=await fetch(`${API}/${path}`,{...init,headers,signal:AbortSignal.timeout(30000)});
+    const r=await safeFetch(`${API}/${path}`,{...init,headers,signal:AbortSignal.timeout(30000)});
     if(r.status===401 && attempt===0) {await r.body?.cancel();await stateDelete(ctx,await sessionKey(ctx));continue;}
     if(!r.ok) {await r.body?.cancel();throw new Error('MovieLens is unavailable');}
-    const json=await r.json() as {data:T;status?:string};
+    const json=await limitedJson(r) as {data:T;status?:string};
     if(json.status&&json.status!=='success')throw new Error('MovieLens rejected the request');
     return json.data;
   }

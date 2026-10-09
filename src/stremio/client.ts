@@ -22,7 +22,7 @@ export function addonBase(manifestUrl: string): string | null {
 export async function getManifest(manifestUrl: string): Promise<Manifest | null> {
   const base = addonBase(manifestUrl);
   if (!base) return null;
-  return fetchJson<Manifest>(`${base}/manifest.json`, { ttl: 3600 });
+  return fetchJson<Manifest>(`${base}/manifest.json`, { addon:true, ttl: 3600 });
 }
 
 function resourceSupports(manifest: Manifest, resource: string, type: string, id?: string): boolean {
@@ -44,12 +44,12 @@ function resourceSupports(manifest: Manifest, resource: string, type: string, id
 export async function addonCatalog(base: string, type: ContentType, id: string, extra: Record<string, string | number | undefined> = {}): Promise<MetaPreview[]> {
   const parts = Object.entries(extra).filter(([, v]) => v !== undefined && v !== '' && v !== 0).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`);
   const url = `${base}/catalog/${type}/${encodeURIComponent(id)}${parts.length ? `/${parts.join('&')}` : ''}.json`;
-  const data = await fetchJson<{ metas?: MetaPreview[] }>(url, { ttl: 600 });
+  const data = await fetchJson<{ metas?: MetaPreview[] }>(url, { addon:true, ttl: 600 });
   return data?.metas ?? [];
 }
 
 export async function addonMeta(base: string, type: ContentType, id: string): Promise<Meta | null> {
-  const data = await fetchJson<{ meta?: Meta }>(`${base}/meta/${type}/${encodeURIComponent(id)}.json`, { ttl: 1800 });
+  const data = await fetchJson<{ meta?: Meta }>(`${base}/meta/${type}/${encodeURIComponent(id)}.json`, { addon:true, ttl: 1800 });
   return data?.meta ?? null;
 }
 
@@ -97,8 +97,8 @@ export async function externalStreams(ctx: Ctx, type: ContentType, ids: string |
       const manifest = await getManifest(url);
       const asked = pickSupported(manifest, 'stream', [type, fallbackType], candidates);
       if (!asked) return [];
-      const data = await fetchJson<{ streams?: Stream[] }>(`${base}/stream/${asked.type}/${encodeURIComponent(asked.id)}.json`, { ttl: 0, timeoutMs: 20000 });
-      const name = manifest?.name || base;
+      const data = await fetchJson<{ streams?: Stream[] }>(`${base}/stream/${asked.type}/${encodeURIComponent(asked.id)}.json`, { addon:true, ttl: 0, timeoutMs: 20000 });
+      const name = manifest?.name || 'Add-on';
       return (Array.isArray(data?.streams) ? data.streams : [])
         .filter((s) => s && typeof s === 'object' && !Array.isArray(s))
         .map((s) => ({ ...s, addon: name }));
@@ -123,7 +123,7 @@ export async function externalSubtitles(ctx: Ctx, type: ContentType, ids: string
     const asked = pickSupported(manifest, 'subtitles', [type, fallbackType], candidates);
     if (!asked) return [];
     const path = `${base}/subtitles/${asked.type}/${encodeURIComponent(asked.id)}${parts.length ? `/${parts.join('&')}` : ''}.json`;
-    const data = await fetchJson<{ subtitles?: Subtitle[] }>(path, { ttl: 600 });
+    const data = await fetchJson<{ subtitles?: Subtitle[] }>(path, { addon:true, ttl: 600 });
     return data?.subtitles ?? [];
   });
   return uniq(results.flat(), (s) => s.url);
@@ -134,7 +134,7 @@ export async function externalCatalogs(ctx: Ctx): Promise<Array<{ base: string; 
     const base = addonBase(url);
     const manifest = base ? await getManifest(url) : null;
     if (!base || !manifest) return [];
-    return (manifest.catalogs || []).map(catalog => ({ base, addonName: manifest.name, catalog }));
+    return (manifest.catalogs || []).map(catalog => ({ base, addonName: manifest.name || 'Add-on', catalog }));
   });
   return groups.flat();
 }

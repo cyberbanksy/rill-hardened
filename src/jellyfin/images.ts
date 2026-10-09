@@ -1,3 +1,5 @@
+import {IMAGE_LIMIT,readLimited,rasterType,MEDIA_HEADERS} from '../security/limits';
+import {safeFetch,addonHttpAllowed} from '../security/outbound';
 import type { Meta } from '../stremio/types';
 import { decodeGuid } from './ids';
 import type { Library } from './library';
@@ -80,31 +82,30 @@ export async function imageResponse(jf: JfRequest, request: Request, url: string
   }
   // Quality is accepted as a client preference; original encoding and alpha are preserved.
   const source = sizedImage(url, kind, maxWidth);
-  const cacheKey = `${jf.ctx.origin}/.rill-images/${jf.ctx.scope}/${artworkTag(source)}`;
+  const cacheKey = `${jf.ctx.origin}/.rill-images-v2/${jf.ctx.scope}/${artworkTag(source)}`;
   let response: Response | undefined;
   try { response = await caches.default.match(cacheKey); } catch {}
   if (!response) {
     let upstream: Response;
-    try { upstream = await fetch(source, {signal:AbortSignal.timeout(15000)}); }
+    try { upstream = await safeFetch(source, {signal:AbortSignal.timeout(15000)}); }
     catch {
-      console.warn('Jellyfin image fetch failed', {type:kind,host:new URL(source).hostname});
+      console.warn('Jellyfin image fetch failed');
       return new Response(null, {status:502,headers:{'cache-control':'no-store'}});
     }
     const contentType = upstream.headers.get('content-type') ?? '';
     if (!upstream.ok || !contentType.toLowerCase().startsWith('image/')) {
       await upstream.body?.cancel();
-      console.warn('Jellyfin image unavailable', {type:kind,host:new URL(source).hostname,status:upstream.status});
+      console.warn('Jellyfin image unavailable');
       return new Response(null, {status:upstream.status === 404 ? 404 : 502,headers:{'cache-control':'no-store'}});
     }
-    response = new Response(upstream.body, {headers:{
-      'content-type':contentType,
-      'cache-control':'public, max-age=86400',
-      etag:upstream.headers.get('etag') ?? `"${artworkTag(source)}"`,
-      'x-content-type-options':'nosniff',
-    }});
+    let bytes:Uint8Array;
+    try {bytes=await readLimited(upstream.body,IMAGE_LIMIT);}catch{return new Response(null,{status:502});}
+    const mime=rasterType(contentType,bytes);if(!mime)return new Response(null,{status:502,headers:{'cache-control':'no-store'}});
+    response=new Response(bytes,{headers:{...MEDIA_HEADERS,'content-type':mime,'cache-control':'public, max-age=86400',etag:`"${artworkTag(source)}"`}});
     if (jf.ctx.defer) jf.ctx.defer(caches.default.put(cacheKey, response.clone()).catch(() => {}));
   }
   const headers = new Headers(response.headers);
+  for(const [key,value] of Object.entries(MEDIA_HEADERS))headers.set(key,value);
   if (!jf.q('tag')) headers.set('cache-control', 'public, max-age=300');
   const etag = headers.get('etag');
   const matches = (request.headers.get('if-none-match') ?? '').split(',').some(tag => tag.trim() === '*' || tag.trim().replace(/^W\//, '') === etag?.replace(/^W\//, ''));

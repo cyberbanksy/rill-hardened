@@ -1,3 +1,5 @@
+import {limitedJson,limitedText} from '../security/limits';
+import {safeFetch,addonHttpAllowed} from '../security/outbound';
 import type { IdBundle } from '../meta/types';
 import type { ContentType } from '../stremio/types';
 import type { ResumeEntry, WatchSnapshot } from './types';
@@ -69,9 +71,9 @@ export async function sendRequest(url: string, init: RequestInit & { timeoutMs?:
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...rest, signal: ctrl.signal });
+    const res = await safeFetch(url, { ...rest, signal: ctrl.signal });
     let body: unknown = null;
-    const text = await res.text();
+    const text = await limitedText(res);
     if (text) {
       try { body = JSON.parse(text); } catch { body = text; }
     }

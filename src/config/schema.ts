@@ -56,6 +56,7 @@ export interface RillConfig {
   trackers: { primary: TrackerName | 'off'; scrobbleTo: TrackerName[]; media?: Partial<Record<TrackerName, { movie?: boolean; series?: boolean }>>; trakt?: TraktAuth; simkl?: SimklAuth; mal?: MalAuth; anilist?: AnilistAuth };
   ageCap: string;
   advanced: boolean;
+  thirdParty?: {letterboxd:boolean};
   jellyfin: { username: string; password: string; maxSources: number; home: Array<'resume' | 'nextup' | 'latest' | 'upcoming'>; profiles?: JellyfinProfile[]; collections?: JellyfinCollection[] };
   search: { providers: Array<'tmdb' | 'tvdb' | 'mal' | 'anilist' | 'kitsu' | 'cinemeta'>; includeAdult: boolean };
 }
@@ -108,6 +109,7 @@ export function normalizeConfig(input: unknown): RillConfig {
   cfg.trackers.scrobbleTo = arr(cfg.trackers.scrobbleTo) as TrackerName[];
   cfg.ageCap = str(src.ageCap, '');
   cfg.advanced = src.advanced === true;
+  cfg.thirdParty={letterboxd:src.thirdParty?.letterboxd===true};
   cfg.jellyfin = { ...cfg.jellyfin, ...(src.jellyfin ?? {}) };
   const seenProfiles = new Set<string>();
   const seenNames = new Set<string>([cfg.jellyfin.username.toLowerCase()]);

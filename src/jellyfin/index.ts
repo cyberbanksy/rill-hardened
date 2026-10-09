@@ -1,3 +1,5 @@
+import {loginThrottle,resetLogin,helperQuota} from '../security/auth';
+import {limitedJson,limitedText} from '../security/limits';
 import { profileContext, profileUsers } from './profiles';
 import { presentTitles } from './presentation';
 import { revokeToken } from './auth';
@@ -43,7 +45,6 @@ const libraries = new WeakMap<JfRequest, Library>();
 
 const CORS: Record<string, string> = {
   'access-control-allow-origin': '*',
-  'access-control-allow-credentials': 'true',
   'access-control-allow-headers': '*',
   'access-control-expose-headers': '*',
   'access-control-allow-methods': 'GET, HEAD, POST, PUT, DELETE, OPTIONS',
@@ -53,7 +54,7 @@ async function readBody(req: Request): Promise<Record<string, unknown>> {
   if (req.method === 'GET' || req.method === 'HEAD') return {};
   const type = (req.headers.get('content-type') || '').toLowerCase();
   try {
-    const text = await req.text();
+    const text = await limitedText(req,262144);
     if (!text) return {};
     if (type.includes('json') || text.trim().startsWith('{')) {
       const parsed = JSON.parse(text);
@@ -224,6 +225,7 @@ inner.all('/system/ping', (c) => c.json(c.get('jf').ctx.cfg.name || 'Rill'));
 inner.get('/quickconnect/enabled', (c) => c.json(true));
 inner.post('/quickconnect/initiate', async (c) => {
   const jf = c.get('jf');
+  if(!await helperQuota(jf.ctx.env,jf.ctx.scope,'quickconnect',10))return reply(c,{Message:'Try again later'},429);
   return reply(c, quickConnectDto(await startQuickConnect(jf.ctx, jf.client)));
 });
 inner.get('/quickconnect/connect', async (c) => {
@@ -239,7 +241,6 @@ inner.post('/quickconnect/authorize', async (c) => {
 
 async function signIn(c: C): Promise<Response> {
   const jf = c.get('jf');
-  await registerAccount(jf.ctx,true);
   const token = await mintToken(jf.ctx, jf.who.userId, jf.client.deviceId);
   return reply(c, {
     User: userDto(jf.ctx, jf.who),
@@ -251,11 +252,14 @@ async function signIn(c: C): Promise<Response> {
 
 inner.post('/users/authenticatebyname', async (c) => {
   const jf = c.get('jf');
+  const retry=await loginThrottle(jf.ctx.env,c.req.raw);
+  if(retry){c.header('Retry-After',String(retry));return reply(c,{Message:'Try again later'},429);}
   const username = jf.body.Username ?? jf.body.username;
   const password = jf.body.Pw ?? jf.body.pw ?? jf.body.Password ?? jf.body.password ?? '';
   const profile = jf.ctx.cfg.jellyfin.profiles?.find(p => p.name.toLowerCase() === String(username ?? '').trim().toLowerCase());
   const loginCtx = profile ? {...jf.ctx,cfg:{...jf.ctx.cfg,jellyfin:{...jf.ctx.cfg.jellyfin,username:profile.name}}} : jf.ctx;
-  if (!credentialsMatch(loginCtx, username, password)) return reply(c, { Message: 'Invalid username or password' }, 401);
+  if (!await credentialsMatch(loginCtx, username, password)) return reply(c, { Message: 'Invalid username or password' }, 401);
+  await resetLogin(jf.ctx.env);
   jf.ctx = profileContext(jf.ctx,profile?.id)!;
   jf.who = await identityOf(jf.ctx);
   return signIn(c);
@@ -1069,8 +1073,8 @@ inner.get('/users/:uid/images/:type/:index',profileImage);
 inner.on('HEAD', '/users/:uid/images/:type',profileImage);
 inner.on('HEAD', '/users/:uid/images/:type/:index',profileImage);
 
-inner.notFound((c) => c.json({ Message: `Unsupported Jellyfin endpoint: ${c.req.method} ${c.get('jf')?.rawPath ?? ''}` }, 404));
-inner.onError((err, c) => c.json({ Message: err instanceof Error ? err.message : 'Internal error' }, 500));
+inner.notFound((c) => c.json({ Message: 'Unsupported Jellyfin endpoint' }, 404));
+inner.onError((err, c) => c.json({ Message: 'Internal error' }, 500));
 
 export function describeJellyfinId(raw: string): ReturnType<typeof decodeGuid> {
   return decodeGuid(raw);

@@ -1,3 +1,6 @@
+import {imageResponse} from '../jellyfin/images';
+import {artworkTag,imageTaggedJson,imageUrlByTag} from '../jellyfin/image-tags';
+import type {JfRequest} from '../jellyfin/request';
 import { Hono } from 'hono';
 import type { Ctx } from '../context';
 import type { ContentType, Meta, Stream, Subtitle } from '../stremio/types';
@@ -79,6 +82,26 @@ addonRouter.use('*', async (c, next) => {
   c.header('access-control-allow-origin', '*');
 });
 
+async function publicJson(ctx:Ctx,body:unknown,maxAge:number):Promise<Response> {
+ const mappings:Record<string,string>={};
+ const artwork=new Set(['poster','background','logo','thumbnail','cover','backdrop','avatar']);
+ const transform=(value:unknown,key=''):unknown=>{
+  if(typeof value==='string'&&/^https?:\/\//i.test(value)&&artwork.has(key)) {
+   const tag=artworkTag(value);mappings[tag]=value;return `${ctx.origin}/${ctx.cfgToken}/media/${tag}`;
+  }
+  if(Array.isArray(value))return value.map(v=>transform(v,key));
+  if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,transform(v,k)]));
+  return value;
+ };
+ const result=transform(body);
+ if(Object.keys(mappings).length)await imageTaggedJson(ctx,{ImageTags:mappings},(_k,v)=>v);
+ return json(result,maxAge);
+}
+addonRouter.get('/media/:tag',async c=>{
+ const ctx=c.get('ctx'),url=await imageUrlByTag(ctx,c.req.param('tag'));if(!url)return c.body(null,404);
+ return imageResponse({ctx,q:()=>undefined} as unknown as JfRequest,c.req.raw,url,'primary');
+});
+
 addonRouter.get('/manifest.json', async (c) => {
   const ctx = c.get('ctx');
   const manifest = await buildManifest(ctx);
@@ -94,7 +117,7 @@ async function catalogResponse(ctx: Ctx, type: string, id: string, rawExtra: Rec
     metas = [];
   }
   const age = extra.search ? MAX_AGE.empty : metas.length ? MAX_AGE.catalog : MAX_AGE.empty;
-  return json({ metas }, age);
+  return publicJson(ctx,{metas},age);
 }
 
 addonRouter.get('/catalog/:type/:id', (c) => catalogResponse(c.get('ctx'), c.req.param('type'), c.req.param('id'), {}));
@@ -114,7 +137,7 @@ addonRouter.get('/meta/:type/:id', async (c) => {
     if(members.total>1000)throw new Error('Collection is too large for one metadata response');
     meta.videos=members.items.map(m=>({id:m.id,title:m.name,thumbnail:m.poster,released:(m as Meta).released}));
   }
-  return json({ meta: meta ?? null }, meta ? MAX_AGE.meta : MAX_AGE.empty);
+  return publicJson(ctx,{ meta: meta ?? null }, meta ? MAX_AGE.meta : MAX_AGE.empty);
 });
 
 addonRouter.get('/stream/:type/:id', async (c) => {
@@ -132,7 +155,7 @@ addonRouter.get('/stream/:type/:id', async (c) => {
     if (subtitles.length && !stream.subtitles?.length) stream.subtitles = subtitles;
     return stream;
   });
-  return json({ streams: out }, out.length ? MAX_AGE.stream : MAX_AGE.empty);
+  return publicJson(ctx,{ streams: out }, out.length ? MAX_AGE.stream : MAX_AGE.empty);
 });
 
 async function subtitlesResponse(ctx: Ctx, type: string, id: string, rawExtra: Record<string, string>): Promise<Response> {
@@ -144,7 +167,7 @@ async function subtitlesResponse(ctx: Ctx, type: string, id: string, rawExtra: R
   };
   let subtitles: Subtitle[] = [];
   try { subtitles = await externalSubtitles(ctx, stremioType(type), bare(id), extra); } catch { subtitles = []; }
-  return json({ subtitles }, subtitles.length ? MAX_AGE.subtitles : MAX_AGE.empty);
+  return publicJson(ctx,{ subtitles }, subtitles.length ? MAX_AGE.subtitles : MAX_AGE.empty);
 }
 
 addonRouter.get('/subtitles/:type/:id', (c) => subtitlesResponse(c.get('ctx'), c.req.param('type'), c.req.param('id'), {}));

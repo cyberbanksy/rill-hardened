@@ -45,6 +45,7 @@ export function geminiThinking(settings:RecommendationSettings):Record<string,un
   return{};
 }
 export async function generate(settings:RecommendationSettings,prompt:string,grounding=false,json=true):Promise<string> {
+  if(!settings.enabled)throw Error('Enable AI explicitly first');
   if(settings.provider==='openrouter') {
     const model=settings.model.replace(/:online$/,'')+(grounding?':online':'');
     const data=await fetchJson<{choices?:Array<{message?:{content?:string}}>}>('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{authorization:`Bearer ${settings.apiKey}`,'content-type':'application/json'},body:JSON.stringify({model,messages:[{role:'user',content:prompt}],max_tokens:8192,reasoning:{effort:settings.reasoning},...(json?{response_format:{type:'json_object'}}:{})}),timeoutMs:60000});

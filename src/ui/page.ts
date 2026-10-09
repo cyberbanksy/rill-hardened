@@ -573,7 +573,7 @@ function brand(welcome = false, heading = true): string {
 function body(): string {
   return `
 <main>
-<div id="setup-gate" hidden><form id="setup-form" autocomplete="on">${brand(true)}<h2>Create your account</h2><p class="note">One account protects this page and signs you in from Jellyfin apps. Your settings are stored on your Worker and follow you to every device.</p><div class="f"><label class="t" for="setup-user">Username</label><input type="text" id="setup-user" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required></div><div class="f"><label class="t" for="setup-pass">Password</label><input type="password" id="setup-pass" name="password" autocomplete="new-password" minlength="8" required><p class="hint">At least 8 characters.</p></div><div class="f"><label class="t" for="setup-pass2">Confirm password</label><input type="password" id="setup-pass2" autocomplete="new-password" minlength="8" required></div><button type="submit" id="setup-submit">Create account</button><p class="status" id="setup-status" role="alert"></p></form></div>
+<div id="setup-gate" hidden><form id="setup-form" autocomplete="on"><div class="f"><label for="setup-token">Provisioning token</label><input id="setup-token" type="password" autocomplete="off"></div>${brand(true)}<h2>Create your account</h2><p class="note">One account protects this page and signs you in from Jellyfin apps. Your settings are stored on your Worker and follow you to every device.</p><div class="f"><label class="t" for="setup-user">Username</label><input type="text" id="setup-user" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required></div><div class="f"><label class="t" for="setup-pass">Password</label><input type="password" id="setup-pass" name="password" autocomplete="new-password" minlength="8" required><p class="hint">At least 8 characters.</p></div><div class="f"><label class="t" for="setup-pass2">Confirm password</label><input type="password" id="setup-pass2" autocomplete="new-password" minlength="8" required></div><button type="submit" id="setup-submit">Create account</button><p class="status" id="setup-status" role="alert"></p></form></div>
 <div id="login-gate" hidden><form id="login-form" autocomplete="on">${brand(true)}<p class="note">Sign in with your Jellyfin username and password to open your settings.</p><div class="f"><label class="t" for="login-user">Username</label><input type="text" id="login-user" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required></div><div class="f"><label class="t" for="login-pass">Password</label><input type="password" id="login-pass" name="password" autocomplete="current-password" required></div><button type="submit" id="login-submit">Sign in</button><p class="status" id="login-status" role="alert"></p></form></div>
 <header>
   <div class="brand-row">${brand()}<div class="header-actions"><span id="draft-status" role="status" hidden>Saved on this device</span><div id="account" class="account"></div><button type="button" id="menu-btn" aria-label="Open menu" aria-expanded="false" aria-controls="drawer"><span></span><span></span><span></span></button></div></div>
@@ -599,41 +599,6 @@ function body(): string {
   <div class="setting-row"><div><label class="t" for="language">Language</label><p class="hint">For titles, descriptions and artwork.</p></div><div class="f"><input type="text" id="language" data-k="language" list="langs" autocomplete="off" spellcheck="false" placeholder="en-US"><datalist id="langs">${LANGUAGES.map((l) => `<option value="${l}">`).join('')}</datalist></div></div>
 </section>
 
-<section id="s-updates">
-  <h2>Updates</h2>
-  <div class="settings-card">
-    <p class="note">Get the latest Rill improvements. Your account, settings and watch history stay in place.</p>
-    <div class="b"><button type="button" class="primary" id="update-start" disabled>Update Rill</button><button type="button" class="q" id="update-refresh" disabled>Refresh status</button><a href="https://dash.cloudflare.com/?to=/:account/workers-and-pages" target="_blank" rel="noopener noreferrer">View Cloudflare builds ↗</a></div>
-    <p class="status" id="update-status" role="status" aria-live="polite">Sign in to manage updates.</p>
-    <p class="hint update-overview" id="update-overview"></p>
-    <h3>Recent updates</h3>
-    <p class="hint" id="update-history-note">Sign in to see your update history.</p>
-    <ol class="update-history" id="update-history" aria-label="Update history"></ol>
-    <details id="update-settings">
-      <summary id="update-settings-label">Connect updates</summary>
-      <p class="note">Connect Cloudflare once, then update here with one click.</p>
-      <ol class="note">
-        <li>Open your Worker in Cloudflare and go to <strong>Settings → Builds → Deploy Hooks</strong>.</li>
-        <li>Create a hook named <strong>Rill updates</strong> for your production branch (usually <strong>main</strong>).</li>
-        <li>Copy its URL and paste it below.</li>
-      </ol>
-      <div class="f"><label class="t" for="update-hook">Cloudflare Deploy Hook URL</label><input type="password" id="update-hook" autocomplete="off" spellcheck="false" placeholder="Paste your hook URL"><p class="hint">Stored privately on your server. Leave blank to keep your saved connection.</p></div>
-      <label class="note"><input type="checkbox" id="update-daily"> Update automatically each day at 04:17 UTC</label>
-      <div class="b"><button type="button" id="update-save" disabled>Connect updates</button><button type="button" class="q" id="update-disconnect" hidden>Disconnect</button></div>
-      <p class="hint">Updates change your running Rill installation. Your GitHub copy stays unchanged.</p>
-    </details>
-    <details id="update-monitor-settings">
-      <summary>Build results in Rill</summary>
-      <p class="note">Optionally connect read-only access to see queued, running, succeeded, failed, and canceled builds here. Your Deploy Hook continues to work without this.</p>
-      <p class="hint">Create a user API token with <strong>Workers Builds Configuration: Read</strong> and <strong>Workers Scripts: Read</strong>, limited to your account. Cloudflare also calls the builds permission <strong>Workers CI Read</strong>.</p>
-      <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer">Create a read-only token ↗</a>
-      <div class="f"><label class="t" for="update-account-id">Cloudflare account ID</label><input type="text" id="update-account-id" autocomplete="off" spellcheck="false"><p class="hint">The 32-character account ID in your Cloudflare dashboard address.</p></div>
-      <div class="f"><label class="t" for="update-worker">Worker name</label><input type="text" id="update-worker" autocomplete="off" spellcheck="false" placeholder="For example, rill"></div>
-      <div class="f"><label class="t" for="update-token">Read-only API token</label><input type="password" id="update-token" autocomplete="off" spellcheck="false"><p class="hint">Stored privately on your server. Leave blank to keep the saved token.</p></div>
-      <div class="b"><button type="button" id="update-monitor-save" disabled>Connect build results</button><button type="button" class="q" id="update-monitor-remove" hidden>Disconnect build results</button></div>
-    </details>
-  </div>
-</section>
 
 <section id="s-meta">
   <h2><small>2</small>Metadata</h2>
@@ -681,7 +646,7 @@ function body(): string {
     <div class="f" data-needs="publicmetadb"><label class="t" for="l-pmdb-picks">PublicMetaDB pick IDs</label><textarea id="l-pmdb-picks" data-lines="lists.publicmetadbPicks" placeholder="one per line" spellcheck="false"></textarea></div>
     <div class="f" data-needs="tmdb"><label class="t" for="l-tmdb-collections">TMDB collections</label><textarea id="l-tmdb-collections" data-lines="lists.tmdbCollections" placeholder="Collection links or IDs, one per line"></textarea></div>
     <div class="f" data-needs="tvdb"><label class="t" for="l-tvdb">TVDB lists</label><textarea id="l-tvdb" data-lines="lists.tvdb" placeholder="List links or IDs, one per line" spellcheck="false"></textarea></div>
-    <div class="f"><label class="t" for="l-letterboxd">Letterboxd lists and watchlists</label><textarea id="l-letterboxd" data-lines="lists.letterboxd" placeholder="List or watchlist links, one per line" spellcheck="false"></textarea></div>
+    <label class="note"><input type="checkbox" data-k="thirdParty.letterboxd"> Enable Letterboxd via StremThru</label><div class="f"><label class="t" for="l-letterboxd">Letterboxd lists and watchlists</label><textarea id="l-letterboxd" data-lines="lists.letterboxd" placeholder="List or watchlist links, one per line" spellcheck="false"></textarea></div>
     <div class="f"><label class="t" for="l-flixpatrol">FlixPatrol regions</label><textarea id="l-flixpatrol" data-lines="lists.flixpatrol" placeholder="global&#10;romania&#10;united-states" spellcheck="false"></textarea><p class="hint">One region per line. Available charts appear above.</p></div>
   </div>
   </div></details>
@@ -839,7 +804,7 @@ function body(): string {
   <h2><small>8</small>Jellyfin</h2>
   <div class="two">
     <div class="f"><label class="t" for="jf-user">Username</label><input type="text" id="jf-user" data-k="jellyfin.username" autocomplete="off" spellcheck="false"></div>
-    <div class="f"><label class="t" for="jf-pass">Password</label><input type="password" id="jf-pass" data-k="jellyfin.password" autocomplete="off"></div>
+    <div class="f"><label class="t" for="jf-pass">Password</label><input type="password" id="jf-pass" placeholder="Leave blank to keep your password" data-k="jellyfin.password" autocomplete="off"></div>
     <div class="f"><label class="t" for="jf-max">Max sources per title</label><input type="number" id="jf-max" data-k="jellyfin.maxSources" min="1" max="200"></div>
   </div>
   <details class="profile-settings"><summary>Profiles</summary><p class="note">Profiles use the same password. Share your watch history or keep it separate.</p><div id="profiles"></div><button type="button" id="profile-add">Add profile</button></details>
@@ -896,7 +861,7 @@ const JS = String.raw`
     section.appendChild(content);
   });
   document.querySelector('#s-general .section-content').appendChild(document.getElementById('s-age'));
-  var groups = { general:['general','updates'], meta:['meta','search'], catalogs:['catalogs'], collections:['collections'], addons:['addons'], tracking:['tracking'], jellyfin:['jellyfin'], install:['install'] };
+  var groups = { general:['general'], meta:['meta','search'], catalogs:['catalogs'], collections:['collections'], addons:['addons'], tracking:['tracking'], jellyfin:['jellyfin'], install:['install'] };
   Object.keys(groups).forEach(function(key) {
     var panel = document.createElement('div');
     panel.id = 'panel-' + key;
@@ -1038,112 +1003,6 @@ const JS = String.raw`
   }
 
   var account = { durable: false, exists: false, signedIn: false, loaded: false, username: '' }, saveTimer = null, wantedTab = location.hash.slice(1);
-  var updateState = null, updateBusy = false, updateTimer = null, updatePoll = null, updateLoaded = false, updateLoading = false;
-  function showUpdateSettings() {
-    location.hash = 'general'; selectTab('general', false);
-    $('s-updates').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-  function renderUpdates() {
-    var signedIn = account.durable && account.signedIn;
-    $('update-start').disabled = !signedIn || updateBusy || !updateState || !updateState.configured || updateState.retryAfter > 0;
-    $('update-start').textContent = updateBusy ? 'Please wait…' : 'Update Rill';
-    $('update-save').disabled = !signedIn || updateBusy || !updateLoaded;
-    $('update-hook').disabled = !signedIn || updateBusy || !updateLoaded;
-    $('update-daily').disabled = !signedIn || updateBusy || !updateLoaded;
-    $('update-disconnect').disabled = !signedIn || updateBusy;
-    $('update-disconnect').hidden = !updateState || !updateState.configured;
-    $('update-settings-label').textContent = updateState && updateState.configured ? 'Update settings' : 'Connect updates';
-    $('update-save').textContent = updateState && updateState.configured ? 'Save update settings' : 'Connect updates';
-    $('update-refresh').disabled = !signedIn || updateBusy || updateLoading;
-    ['update-account-id','update-worker','update-token','update-monitor-save'].forEach(function(id) { $(id).disabled = !signedIn || updateBusy || !updateLoaded; });
-    var monitor = updateState && updateState.monitor;
-    $('update-monitor-remove').hidden = !monitor || !monitor.configured;
-    $('update-monitor-remove').disabled = !signedIn || updateBusy;
-    $('update-monitor-save').textContent = monitor && monitor.configured ? 'Save build connection' : 'Connect build results';
-    var expanded = Array.from($('update-history').querySelectorAll('details[open]')).map(function(d) { return d.dataset.request; });
-    clear($('update-history'));
-    if (!signedIn || !updateState) {
-      $('update-overview').textContent = '';
-      $('update-history-note').textContent = 'Sign in to see your update history.';
-      return;
-    }
-    var next = new Date(); next.setUTCHours(4,17,0,0); if (next.getTime() <= Date.now()) next.setUTCDate(next.getUTCDate()+1);
-    $('update-overview').textContent = (updateState.configured ? 'Updates connected. ' : 'Updates disconnected. ') + (updateState.daily ? 'Next automatic request: ' + when(next.getTime()) + ' (04:17 UTC).' : 'Automatic updates off.') + (updateState.retryAfter > 0 ? ' You can request another update after ' + when(Date.now()+updateState.retryAfter*1000) + '.' : '');
-    var history = updateState.history || [];
-    $('update-history-note').textContent = !history.length ? 'No requests recorded yet. History starts with your next update.' : 'Your last ' + history.length + ' requests (up to 30).';
-    $('update-history-note').textContent += monitor && monitor.configured ? (monitor.error ? ' ' + monitor.error : monitor.checkedAt ? ' Build results checked ' + when(monitor.checkedAt) + '.' : '') : ' A request accepted by Cloudflare is not yet a confirmed successful build. Connect build results below, or check Cloudflare.';
-    var labels = {requesting:'Sending request',accepted:'Request accepted',request_failed:'Request failed',queued:'Queued',initializing:'Preparing build',running:'Building / deploying',succeeded:'Build succeeded',failed:'Build failed',cancelled:'Canceled',skipped:'Skipped',unknown:'Result unconfirmed'};
-    history.forEach(function(run) {
-      var item = el('li'), head = el('div',{class:'update-history-head'});
-      head.appendChild(el('strong',{text:run.source === 'daily' ? 'Automatic update' : 'Manual update'}));
-      var badge = el('span',{class:'update-result',text:labels[run.status] || 'Result unconfirmed'});
-      badge.setAttribute('data-status',run.status); head.appendChild(badge); item.appendChild(head);
-      item.appendChild(el('p',{class:'hint',text:'Requested ' + when(run.requested_at)}));
-      if (run.message) item.appendChild(el('p',{class:'hint',text:run.message}));
-      if (run.status === 'unknown' && !run.message) item.appendChild(el('p',{class:'hint',text:'No final result was confirmed. Check Cloudflare before requesting another update.'}));
-      if (run.status === 'succeeded') item.appendChild(el('p',{class:'hint',text:'Cloudflare completed the build and deploy command. Reload Rill to load the latest page.'}));
-      if (run.build_id || run.finished_at || run.checked_at) {
-        var details = el('details'); details.dataset.request = run.id; details.open = expanded.indexOf(run.id) !== -1;
-        details.appendChild(el('summary',{text:'Build details'}));
-        if (run.build_id) details.appendChild(el('p',{class:'hint',text:'Build ID: ' + run.build_id}));
-        if (run.branch) details.appendChild(el('p',{class:'hint',text:'Branch: ' + run.branch}));
-        if (run.finished_at) details.appendChild(el('p',{class:'hint',text:'Finished ' + when(run.finished_at) + ' · ' + Math.max(0,Math.round((run.finished_at-run.requested_at)/1000)) + ' seconds after request'}));
-        if (run.checked_at) details.appendChild(el('p',{class:'hint',text:'Confirmed by Cloudflare ' + when(run.checked_at)}));
-        if (run.buildUrl) details.appendChild(el('a',{text:'View build and logs ↗',href:run.buildUrl,target:'_blank',rel:'noopener noreferrer'}));
-        item.appendChild(details);
-      }
-      $('update-history').appendChild(item);
-    });
-  }
-  function adoptUpdateStatus(result, resetSettings) {
-    if (!updateLoaded || resetSettings) {
-      $('update-hook').value = ''; $('update-token').value = '';
-      $('update-daily').checked = result.daily;
-      $('update-account-id').value = result.monitor ? result.monitor.accountId : '';
-      $('update-worker').value = result.monitor ? result.monitor.worker : '';
-    }
-    updateState = result; updateLoaded = true;
-    clearTimeout(updateTimer);
-    if (result.retryAfter > 0) updateTimer = setTimeout(function () {
-      if (updateState) updateState.retryAfter = 0;
-      renderUpdates();
-    }, result.retryAfter * 1000);
-    clearTimeout(updatePoll);
-    if ((result.history || []).some(function(run) { return Date.now()-run.requested_at < 3600000 && (run.status === 'requesting' || (result.monitor && result.monitor.configured && ['accepted','queued','initializing','running','unknown'].indexOf(run.status) !== -1)); })) {
-      updatePoll = setTimeout(function() { if (account.signedIn && !document.hidden) loadUpdates(true); }, 15000);
-    }
-    renderUpdates();
-  }
-  function loadUpdates(silent) {
-    if (!account.signedIn || updateLoading) return;
-    updateLoading = true; renderUpdates();
-    api('/api/updates/status').then(function (r) {
-      if (!account.signedIn) return;
-      if (r.error) { if (!silent) $('update-status').textContent = r.error; return; }
-      adoptUpdateStatus(r);
-      if (!silent) $('update-status').textContent = r.retryAfter > 0 ? 'An update was recently requested. Its result is shown below.' : r.configured ? 'Ready when you are.' : 'Connect Cloudflare below to enable updates.';
-    }).finally(function () { updateLoading = false; renderUpdates(); });
-  }
-  function updateAction(action, body) {
-    updateBusy = true; renderUpdates();
-    $('update-status').textContent = action === 'start' ? 'Requesting an update…' : 'Saving…';
-    api('/api/updates/' + action, body).then(function (r) {
-      if (!account.signedIn) return;
-      if (r.error) { $('update-status').textContent = r.error; if (action === 'start') loadUpdates(true); return; }
-      adoptUpdateStatus(r, action !== 'start');
-      $('update-status').textContent = action === 'start' ? (r.alreadyRequested ? 'An update request is already in progress or was recently accepted. ' : 'Update requested. ') + 'See its result below. Reload Rill after the build succeeds.' : action === 'disconnect' ? 'Updates disconnected.' : action === 'monitor' ? (r.monitor.configured ? 'Build results connected.' : 'Build results disconnected. Request history is kept.') : 'Connected. You can now update Rill with one click.';
-      if (action === 'configure') $('update-settings').open = false;
-      if (action === 'monitor') $('update-monitor-settings').open = false;
-    }).finally(function () { updateBusy = false; renderUpdates(); });
-  }
-  $('update-start').addEventListener('click', function () { updateAction('start'); });
-  $('update-refresh').addEventListener('click', function () { loadUpdates(); });
-  $('update-monitor-save').addEventListener('click', function () { updateAction('monitor', {accountId:$('update-account-id').value,worker:$('update-worker').value,token:$('update-token').value}); });
-  $('update-monitor-remove').addEventListener('click', function () { updateAction('monitor', {disconnect:true}); });
-  document.addEventListener('visibilitychange', function() { if (!document.hidden && account.signedIn && updateLoaded) loadUpdates(true); });
-  $('update-save').addEventListener('click', function () { updateAction('configure', { hook: $('update-hook').value, daily: $('update-daily').checked }); });
-  $('update-disconnect').addEventListener('click', function () { updateAction('disconnect'); });
-  $('update-settings').addEventListener('toggle', function () { if (this.open && !updateLoaded) loadUpdates(); });
   function adoptServerConfig(config) {
     if (!config) return;
     var key = cfg.installationKey;
@@ -1168,7 +1027,6 @@ const JS = String.raw`
       var pop = el('div', { class: 'popover', role: 'menu', hidden: true });
       function openPop(open) { pop.hidden = !open; chip.setAttribute('aria-expanded', String(open)); if (open) { clear(pop);
         pop.appendChild(el('div', { class: 'pop-user' }, [el('span', { class: 'avatar big', 'aria-hidden': 'true', text: initial(account.username) }), el('div', {}, [el('strong', { text: account.username }), el('small', { text: statusText() })])]));
-        pop.appendChild(el('button', { type: 'button', role: 'menuitem', text: 'Update Rill', onclick: function () { openPop(false); showUpdateSettings(); } }));
         pop.appendChild(el('button', { type: 'button', role: 'menuitem', text: 'Log out', onclick: function () { openPop(false); logout(); } })); } }
       chip.addEventListener('click', function (e) { e.stopPropagation(); openPop(pop.hidden); });
       activePop = { pop: pop, chip: chip, host: host, close: function () { openPop(false); } };
@@ -1182,12 +1040,6 @@ const JS = String.raw`
     var firstRun = account.durable && !account.exists;
     $('setup-gate').hidden = !firstRun;
     if (firstRun) { $('setup-user').value = $('setup-user').value || (cfg.jellyfin.username !== 'rill' ? cfg.jellyfin.username : ''); $('setup-user').focus(); }
-    if (!account.signedIn) {
-      updateState = null; updateLoaded = false; clearTimeout(updateTimer); clearTimeout(updatePoll);
-      $('update-hook').value = ''; $('update-token').value = ''; $('update-account-id').value = ''; $('update-worker').value = ''; $('update-daily').checked = false;
-      $('update-status').textContent = 'Sign in to manage updates.';
-    } else if (!updateLoaded) loadUpdates();
-    renderUpdates();
   }
   $('setup-form').addEventListener('submit', function (e) {
     e.preventDefault();
@@ -1232,10 +1084,10 @@ const JS = String.raw`
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !drawer.hidden) closeDrawer(); });
   all('.seg [data-mode]').forEach(function (b) { b.addEventListener('click', function () { cfg.advanced = b.dataset.mode === 'advanced'; changed(); applyMode(); renderDrawerNav(); }); });
   function saveRemote() {
-    return api('/api/account/save', { config: cfg }).then(function (r) {
+    return api('/api/account/save', { config: cfg, setupToken: $('setup-token').value }).then(function (r) {
       if (r.error) { $('draft-status').textContent = r.error; return r; }
       $('draft-status').textContent = 'Saved to your server';
-      if (r.config && r.config.installationKey) cfg.installationKey = r.config.installationKey;
+      if(r.config) {cfg=merge(DEFAULTS,r.config);fillInputs();renderTrackerStates();refreshNeeds();}
       if (r.token) { token = r.token; renderInstall(); }
       return r;
     });
@@ -1727,7 +1579,7 @@ const JS = String.raw`
   $('check-recommendations').addEventListener('click',function(){api('/api/recommendations/status',cfg).then(recommendationProgress);});
   function movieLensResult(r){var s=r.status||{};$('ml-result').textContent=r.error||s.error||(s.checkedAt?'Last checked '+new Date(s.checkedAt).toLocaleString()+'. ':'')+(s.successCount!==undefined?s.successCount+' imported, '+s.alreadyRatedCount+' already rated, '+s.errorCount+' rejected.':s.checkedAt?'No changed ratings.':'No import recorded yet.');}
   ['sync','status'].forEach(function(action){$('ml-'+action).addEventListener('click',function(){var button=this;button.disabled=true;$('ml-result').textContent=action==='sync'?'Importing ratings…':'Checking…';api('/api/movielens/'+action,cfg).then(movieLensResult).finally(function(){button.disabled=false;});});});
-  $('ml-csv').addEventListener('change',async function(){var file=this.files[0];if(!file)return;if(file.size>5000000){$('ml-result').textContent='Choose a file smaller than 5 MB.';return;}this.disabled=true;try{movieLensResult(await api('/api/movielens/import',{config:cfg,csv:await file.text()}));}finally{this.disabled=false;this.value='';}});
+  $('ml-csv').addEventListener('change',async function(){var file=this.files[0];if(!file)return;if(file.size>180000){$('ml-result').textContent='Choose a file smaller than 180 KB.';return;}this.disabled=true;try{movieLensResult(await api('/api/movielens/import',{config:cfg,csv:await file.text()}));}finally{this.disabled=false;this.value='';}});
   renderCustomCatalogs();
   function swapCatalog(a, b) { var t = cfg.catalogs[a]; cfg.catalogs[a] = cfg.catalogs[b]; cfg.catalogs[b] = t; renderCatalogs(); changed(); }
 
@@ -1824,7 +1676,7 @@ const JS = String.raw`
   function fillInputs() {
     all('[data-k]').forEach(function (n) {
       var v = get(n.getAttribute('data-k'));
-      if (n.type === 'checkbox') n.checked = !!v; else n.value = v == null ? '' : v;
+      if (n.type === 'checkbox') n.checked = !!v; else n.value = v == null || v === '__RILL_SAVED__' ? '' : v;
     });
     all('[data-arr]').forEach(function (n) { n.checked = (get(n.getAttribute('data-arr')) || []).indexOf(n.value) >= 0; });
     all('[data-lines]').forEach(function (n) { n.value = (get(n.getAttribute('data-lines')) || []).join('\n'); });
@@ -2150,19 +2002,13 @@ const JS = String.raw`
 
   async function deliveryStatus(retry) {
     var status=$('delivery-status');status.textContent='Checking…';
-    var base=ORIGIN, access;
     try {
-      var login=await fetch(base+'/Users/AuthenticateByName',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({Username:cfg.jellyfin.username,Pw:cfg.jellyfin.password})});
-      var user=await login.json();if(!login.ok || !user.AccessToken)throw Error('Sign-in failed.');access=user.AccessToken;
-      var headers={'x-emby-token':access};
-      if(retry){var queued=await fetch(base+'/Tracking/Retry',{method:'POST',headers:headers});if(!queued.ok)throw Error('Could not queue retries.');}
-      var result=await fetch(base+'/Tracking/Status',{headers:headers});if(!result.ok)throw Error('Could not read delivery status.');
-      var state=await result.json();
+      if(retry){var queued=await api('/api/tracking/retry');if(queued.error)throw Error(queued.error);}
+      var state=await api('/api/tracking/status');if(state.error)throw Error(state.error);
       status.textContent=!state.durable ? 'Durable storage is not configured.' : state.failed ? state.failed+' failed; '+state.pending+' waiting. Reconnect the affected service, then retry.' : state.pending ? state.pending+' updates waiting for delivery.' : 'All queued updates delivered.';
       if(state.services && state.services.length)status.textContent+=' '+state.services.map(function(s){return s.service+': '+s.count+' '+s.status;}).join(' · ');
       $('delivery-retry').hidden=!state.failed;
     } catch(e){status.textContent=e.message || 'Could not check delivery status.';}
-    finally {if(access)fetch(base+'/Sessions/Logout',{method:'POST',headers:{'x-emby-token':access}}).catch(function(){});}
   }
   $('delivery-check').addEventListener('click',function(){deliveryStatus(false);});
   $('delivery-retry').addEventListener('click',function(){deliveryStatus(true);});

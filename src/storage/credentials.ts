@@ -1,3 +1,4 @@
+import {seal,unseal} from '../security/secrets';
 import type { Ctx } from '../context';
 import type { MalAuth, TraktAuth } from '../config/schema';
 import { sendRequest } from '../trackers/common';
@@ -18,9 +19,9 @@ async function loadCredentials<T extends Auth>(ctx: Ctx, service: Service, initi
   const db = ctx.env.DB;
   if (!db) return initial;
   await db.prepare('INSERT INTO credentials(scope,service,value) VALUES(?,?,?) ON CONFLICT(scope,service) DO NOTHING')
-    .bind(ctx.scope,service,JSON.stringify(initial)).run();
+    .bind(ctx.scope,service,await seal(JSON.stringify(initial),ctx.env,`credential:${ctx.scope}:${service}`)).run();
   const row = await db.prepare('SELECT value FROM credentials WHERE scope=? AND service=?').bind(ctx.scope,service).first<{value:string}>();
-  const current = JSON.parse(row!.value) as T;
+  const current = JSON.parse(await unseal(row!.value,ctx.env,`credential:${ctx.scope}:${service}`)) as T;
   if (expires(current) > Date.now()+300_000 || !current.refreshToken) return current;
   const lease = crypto.randomUUID();
   const locked = await db.prepare('UPDATE credentials SET lease=?,lease_until=? WHERE scope=? AND service=? AND lease_until<=? AND value=? RETURNING value')
@@ -44,7 +45,7 @@ async function loadCredentials<T extends Auth>(ctx: Ctx, service: Service, initi
     if (!response.ok || !value?.access_token || !Number.isFinite(value.expires_in) || Number(value.expires_in)<=0) throw new Error('Credential refresh rejected');
     const updated = { ...current,accessToken:value.access_token,refreshToken:value.refresh_token || current.refreshToken,expiresAt:Date.now()+Number(value.expires_in)*1000 };
     const saved = await db.prepare('UPDATE credentials SET value=?,lease=NULL,lease_until=0 WHERE scope=? AND service=? AND lease=?')
-      .bind(JSON.stringify(updated),ctx.scope,service,lease).run();
+      .bind(await seal(JSON.stringify(updated),ctx.env,`credential:${ctx.scope}:${service}`),ctx.scope,service,lease).run();
     if (!saved.meta.changes) throw new Error('Credential refresh lease lost');
     return updated;
   } catch (error) {

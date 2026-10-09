@@ -8,11 +8,11 @@ import { applyAgeCap } from './agecap';
 import { mapLimit } from '../util/concurrency';
 
 export function aiQuery(ctx:Ctx,query:string):string|null {
-  return ctx.cfg.recommendations?.aiSearch&&/^ai:\s*\S/i.test(query)?query.replace(/^ai:\s*/i,'').trim():null;
+  return ctx.cfg.recommendations?.enabled&&ctx.cfg.recommendations?.aiSearch&&/^ai:\s*\S/i.test(query)?query.replace(/^ai:\s*/i,'').trim():null;
 }
 export async function aiSearch(ctx:Ctx,type:ContentType,query:string,skip=0):Promise<MetaPreview[]> {
   const settings=ctx.cfg.recommendations;
-  if(!settings?.aiSearch||!settings.apiKey||!settings.model||!ctx.tmdbKey)return [];
+  if(!settings?.enabled||!settings.aiSearch||!settings.apiKey||!settings.model||!ctx.tmdbKey)return [];
   if(query.length>2000)throw new Error('AI search is limited to 2,000 characters');
   const key=`ai-search:v1:${ctx.historyScope??ctx.scope}:${await sha256(JSON.stringify([type,query,settings.provider,settings.model,settings.webSearch,settings.reasoning,ctx.cfg.language,ctx.cfg.search.includeAdult]))}`;
   const rows=await stored(ctx,key,86400,async()=>{
@@ -44,7 +44,7 @@ const FIELDS:Record<string,string>={
 };
 export async function aiCatalog(ctx:Ctx,query:string,provider:string,type:string):Promise<CustomCatalog> {
   const settings=ctx.cfg.recommendations;
-  if(!settings?.apiKey||!settings.model)throw new Error('Enter an AI provider key and model first');
+  if(!settings?.enabled||!settings.apiKey||!settings.model)throw new Error('Enter an AI provider key and model first');
   if(!FIELDS[provider]||!['movie','series','anime'].includes(type))throw new Error('Choose a supported catalog provider and media type');
   if(!query.trim()||query.length>2000)throw new Error('Describe a catalog in 1–2,000 characters');
   const answer=await generate(settings,`Build a ${provider} discovery query for ${type}. Return JSON {"name":"Short catalog name","params":{}}. Only these provider fields are accepted: ${FIELDS[provider]}. Use documented enum values. Use ISO dates or today-30d/today+7d expressions for moving dates. Never include an API key, URL, credentials or script. Do not invent numeric person/keyword IDs; omit an uncertain filter. For similar-title requests choose thematic genres. Viewer request: ${JSON.stringify(query)}.`);

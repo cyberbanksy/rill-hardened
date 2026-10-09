@@ -17,6 +17,7 @@
       "max_concurrency": 1
     }]
   },
-  "observability": { "enabled": true },
+  "observability": { "enabled": false },
+  "workers_dev": true,
   "vars": {}
 }

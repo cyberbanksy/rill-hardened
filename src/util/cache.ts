@@ -1,12 +1,17 @@
+import type {Env} from '../env';
+import {seal,unseal} from '../security/secrets';
+import {sha256} from './bytes';
+import {limitedJson,limitedText} from '../security/limits';
+import {safeFetch,addonHttpAllowed} from '../security/outbound';
 import { tryGetContext } from 'hono/context-storage';
 
-const NS = 'https://rill.cache.invalid/';
+const NS = 'https://rill.cache.invalid/v2/';
 const DATABASE_MIN_TTL = 900;
 
-function keyUrl(key: string, origin?: string): string {
+async function keyUrl(key: string, origin?: string): Promise<string> {
   const requestUrl = tryGetContext()?.req.url;
   origin ??= requestUrl ? new URL(requestUrl).origin : undefined;
-  return (origin ? `${origin}/.rill-cache/` : NS) + encodeURIComponent(key);
+  return (origin ? `${origin}/.rill-cache-v2/` : NS) + await sha256(key);
 }
 
 const hot = new Map<string, {json:string; expires:number}>();
@@ -29,34 +34,40 @@ function cacheDatabase(): D1Database | undefined {
 }
 
 export async function cacheGet<T>(key: string, origin?: string): Promise<T | null> {
-  const url = keyUrl(key, origin);
+  const url = await keyUrl(key, origin);
   const cached=hot.get(url);
   if(cached&&cached.expires>Date.now())return JSON.parse(cached.json) as T;
   forgetHot(url);
   try {
     const hit = await caches.default.match(url);
-    if (hit) return await hit.json() as T;
+    const env=tryGetContext<{Bindings:Env}>()?.env;
+    if(hit&&env?.RILL_DATA_KEY)return JSON.parse(await unseal(await limitedText(hit),env,`cache:${url}`)) as T;
   } catch {}
   try {
     const row = await cacheDatabase()?.prepare('SELECT value,expires FROM state WHERE key=? AND expires>?')
       .bind(`cache:${url}`,Date.now()).first<{value:string;expires:number}>();
     if(!row)return null;
-    const value=JSON.parse(row.value) as T;
-    rememberHot(key,url,row.value,row.expires);
+    const env=tryGetContext<{Bindings:Env}>()?.env;if(!env?.RILL_DATA_KEY)return null;
+    const json=await unseal(row.value,env,`cache:${url}`);
+    const value=JSON.parse(json) as T;
+    rememberHot(key,url,json,row.expires);
     return value;
   } catch { return null; }
 }
 
 export async function cachePut(key: string, value: unknown, ttlSeconds: number, origin?: string): Promise<void> {
-  const url = keyUrl(key, origin);
+  const url = await keyUrl(key, origin);
   let json: string;
   try { json = JSON.stringify(value); } catch { return; }
   if (json === undefined) return;
   const ttl = Math.max(1,Math.floor(ttlSeconds));
   const expires=Date.now()+ttl*1000;
   rememberHot(key,url,json,expires);
+  const env=tryGetContext<{Bindings:Env}>()?.env;
+  if(!env?.RILL_DATA_KEY)return;
+  const encrypted=await seal(json,env,`cache:${url}`);
   try {
-    await caches.default.put(url, new Response(json, {
+    await caches.default.put(url, new Response(encrypted, {
       headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttl}` },
     }));
   } catch {}
@@ -66,13 +77,13 @@ export async function cachePut(key: string, value: unknown, ttlSeconds: number, 
   if (db && ttl >= DATABASE_MIN_TTL && json.length <= 64_000 && new TextEncoder().encode(json).byteLength <= 64_000) {
     try {
       await db.prepare('INSERT INTO state(key,value,expires) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,expires=excluded.expires')
-        .bind(`cache:${url}`,json,expires).run();
+        .bind(`cache:${url}`,encrypted,expires).run();
     } catch {}
   }
 }
 
 export async function cacheDelete(key: string, origin?: string, db = cacheDatabase()): Promise<void> {
-  const url = keyUrl(key, origin);
+  const url = await keyUrl(key, origin);
   forgetHot(url);
   try { await caches.default.delete(url); } catch {}
   if (db) await db.prepare('DELETE FROM state WHERE key=?').bind(`cache:${url}`).run();
@@ -90,10 +101,11 @@ export interface FetchJsonOptions extends RequestInit {
   ttl?: number;
   timeoutMs?: number;
   cacheScope?: string;
+  addon?: boolean;
 }
 
 export async function fetchJson<T = any>(url: string, opts: FetchJsonOptions = {}): Promise<T | null> {
-  const { ttl = 0, timeoutMs = 12000, cacheScope = '', ...init } = opts;
+  const { ttl = 0, timeoutMs = 12000, cacheScope = '', addon=false, ...init } = opts;
   const method = (init.method || 'GET').toUpperCase();
   const key = `json:${cacheScope}:${url}`;
   if (method === 'GET' && ttl > 0) {
@@ -103,12 +115,12 @@ export async function fetchJson<T = any>(url: string, opts: FetchJsonOptions = {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...init, signal: ctrl.signal });
+    const res = await safeFetch(url, { ...init, signal: ctrl.signal },{allowHttp:addon&&addonHttpAllowed()});
     if (!res.ok) {
       await res.body?.cancel();
       return null;
     }
-    const data = (await res.json()) as T;
+    const data = (await limitedJson(res)) as T;
     if (method === 'GET' && ttl > 0 && data !== null && data !== undefined) await cachePut(key, data, ttl);
     return data;
   } catch {

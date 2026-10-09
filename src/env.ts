@@ -7,6 +7,8 @@ export interface Env {
   RILL_SECRET?: string;
   TMDB_KEY?: string;
   D1_QUERY_BUDGET?: string;
-  RILL_UPDATE_HOOK?: string;
+  RILL_DATA_KEY?: string;
+  RILL_SETUP_TOKEN?: string;
+  ALLOW_HTTP_ADDONS?: string;
   RILL_JOBS?: Queue<RillJob>;
 }

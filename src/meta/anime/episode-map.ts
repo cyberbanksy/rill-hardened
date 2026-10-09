@@ -1,3 +1,5 @@
+import {limitedJson,limitedText} from '../../security/limits';
+import {safeFetch,addonHttpAllowed} from '../../security/outbound';
 import type { Ctx } from '../../context';
 import { memo } from '../../util/cache';
 export type EpisodeSpace = 'tvdb' | 'tmdb';
@@ -72,9 +74,9 @@ export function loadEpisodeMaps(ctx: Ctx): Promise<EpisodeMap[]> {
   let task = requests.get(ctx);
   if (!task) {
     task = memo('anime:episode-map:v1', 86400, async () => {
-      const res = await fetch(URL, { signal: AbortSignal.timeout(15000) });
+      const res = await safeFetch(URL, { signal: AbortSignal.timeout(15000) });
       if (!res.ok) throw new Error('Episode mapping source unavailable');
-      const xml = await res.text();
+      const xml = await limitedText(res);
       if (xml.length > 8_000_000) throw new Error('Episode mapping source too large');
       const rows = parseEpisodeMaps(xml);
       if (!rows.length) throw new Error('Episode mapping source invalid');

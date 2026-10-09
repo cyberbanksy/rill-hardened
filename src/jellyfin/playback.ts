@@ -1,3 +1,5 @@
+import {SUBTITLE_LIMIT,limitedText,limitStream,MEDIA_HEADERS} from '../security/limits';
+import {safeFetch,addonHttpAllowed} from '../security/outbound';
 import { externalStreams, externalSubtitles } from '../stremio/client';
 import type { Stream } from '../stremio/types';
 import { containerOf, mediaSource, mediaSourceId, runtimeTicks, streamLabel, subtitleContentType, subtitleFormat, subtitleEntries, type Dto, type MediaSourceInput } from './dto';
@@ -97,17 +99,17 @@ export async function subtitleResponse(sources: Dto[], sourceId: string, index: 
   const url = sub?.DeliveryUrl ? subtitleUrlOf(sub) : null;
   if (!url) return new Response('Subtitle not found', { status: 404 });
   try {
-    const upstream = await fetch(url, { headers: { accept: '*/*' },signal:AbortSignal.timeout(15000) });
+    const upstream = await safeFetch(url, { headers: { accept: '*/*' },signal:AbortSignal.timeout(15000) });
     if (!upstream.ok) return new Response('Subtitle unavailable', { status: 502 });
     const original=subtitleFormat(url),requested=fmt.replace(/^.*\./,'').toLowerCase();
     const type = subtitleContentType(requested || original);
     if(requested==='vtt'&&original==='srt') {
-      const text=(await upstream.text()).replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n');
+      const text=(await limitedText(upstream,SUBTITLE_LIMIT)).replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n');
       const vtt='WEBVTT\n\n'+text.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g,'$1.$2');
-      return new Response(vtt,{headers:{'content-type':type,'cache-control':'private, max-age=3600'}});
+      return new Response(vtt,{headers:{...MEDIA_HEADERS,'content-type':type,'cache-control':'private, max-age=3600'}});
     }
     if(requested&&requested!==original){await upstream.body?.cancel();return new Response('Unsupported subtitle conversion',{status:400});}
-    return new Response(upstream.body, { status: 200, headers: { 'content-type': type, 'cache-control': 'private, max-age=3600' } });
+    return new Response(upstream.body?limitStream(upstream.body,SUBTITLE_LIMIT):null, { status: 200, headers: { ...MEDIA_HEADERS,'content-type': type, 'cache-control': 'private, max-age=3600' } });
   } catch {
     return new Response('Subtitle unavailable', { status: 502 });
   }

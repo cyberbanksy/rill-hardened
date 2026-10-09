@@ -57,3 +57,18 @@ test('AI keys/search flags and saved Letterboxd lists do not bypass explicit opt
  try {assert.equal((await sourceDefinitions(ctx)).some(d=>d.id.startsWith('letterboxd.')),false);assert.deepEqual(await sourceItems(ctx,'movie','letterboxd.0',{}),[]);}
  finally{globalThis.fetch=original;}
 });
+test('built-in DNS check uses a redirect mode Workers accept',async()=>{
+ // Workers throw on redirect:'error', which once broke every add-on fetch while mocked tests passed.
+ const real=globalThis.fetch, modes=[];
+ globalThis.fetch=async(url,init={})=>{
+  if(init.redirect==='error') throw TypeError('Invalid redirect value');
+  modes.push(init.redirect);
+  if(String(url).startsWith('https://cloudflare-dns.com/')) return Response.json({Status:0,Answer:[{type:1,data:'8.8.8.8'}]});
+  return Response.json({ok:true});
+ };
+ try{
+  const res=await safeFetch('https://public.example/manifest.json');
+  assert.deepEqual(await res.json(),{ok:true});
+  assert.ok(modes.every(m=>m==='manual'));
+ }finally{globalThis.fetch=real;}
+});

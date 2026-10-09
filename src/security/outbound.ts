@@ -54,7 +54,8 @@ async function resolvePublic(host: string): Promise<string[]> {
     const addresses: string[] = [];
     for (const type of ['A', 'AAAA']) {
         // Fixed HTTPS resolver bootstrap; never accepts a caller-supplied resolver URL.
-        const res = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=${type}`, { headers: { accept: 'application/dns-json' }, redirect: 'error', signal: AbortSignal.timeout(5000) });
+        // Workers reject redirect: 'error'; with 'manual' a 3xx is not ok and fails below.
+        const res = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=${type}`, { headers: { accept: 'application/dns-json' }, redirect: 'manual', signal: AbortSignal.timeout(5000) });
         if (!res.ok)
             throw Error('DNS lookup failed');
         const data = await limitedJson<{

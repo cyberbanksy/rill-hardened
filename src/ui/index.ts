@@ -120,10 +120,10 @@ async function buildCtx(cfg: RillConfig, env: Env | undefined, origin: string): 
   };
 }
 
-uiRouter.get('/', async (c) => {
+uiRouter.get('/', (c) => {
   return c.html(renderPage(), 200, {
     'Cache-Control': 'no-store',
-    'Content-Security-Policy': await pagePolicy(),
+    'Content-Security-Policy': pagePolicy(),
     'X-Frame-Options': 'DENY',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',

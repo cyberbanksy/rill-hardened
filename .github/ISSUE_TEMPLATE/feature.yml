@@ -1,0 +1,15 @@
+name: Feature request
+description: Suggest a change to this fork.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security impact
+      description: Does this add a route, a stored secret, an outbound request or anything reachable without a login?

@@ -1,16 +1,29 @@
 import {seal,unseal} from '../security/secrets';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import type { Ctx } from '../context';
 
 const remembered = new WeakMap<D1Database, Map<string, number>>();
-const tagsByUrl = new Map<string, string>();
+const tagsByKey = new Map<string, Map<string, string>>();
 
-export function artworkTag(url: string): string {
-  let tag = tagsByUrl.get(url);
+/**
+ * With the data key, tags are keyed HMACs: nobody can compute the tag of a known artwork URL, so an image
+ * request without a session works only with a tag the server already handed to a signed-in client.
+ * Without it (internal cache keys and ETags only) the tag is a plain digest.
+ */
+export function artworkTag(url: string, dataKey = ''): string {
+  let tags = tagsByKey.get(dataKey);
+  if (!tags) {
+    if (tagsByKey.size >= 4) tagsByKey.clear();
+    tags = new Map();
+    tagsByKey.set(dataKey, tags);
+  }
+  let tag = tags.get(url);
   if (!tag) {
-    tag = createHash('md5').update(url).digest('hex');
-    if (tagsByUrl.size >= 4096) tagsByUrl.delete(tagsByUrl.keys().next().value!);
-    tagsByUrl.set(url, tag);
+    tag = dataKey
+      ? createHmac('sha256', createHmac('sha256', dataKey).update('rill:image-tag:v2').digest()).update(url).digest('hex').slice(0, 32)
+      : createHash('md5').update(url).digest('hex');
+    if (tags.size >= 4096) tags.delete(tags.keys().next().value!);
+    tags.set(url, tag);
   }
   return tag;
 }
@@ -24,7 +37,7 @@ export async function imageTaggedJson(ctx: Ctx, body: unknown, replacer: (key: s
   const mappings = new Map<string, string>();
   const tagOf = (value: unknown): unknown => {
     if (typeof value !== 'string' || !/^https?:\/\//i.test(value)) return value;
-    const tag = artworkTag(value);
+    const tag = artworkTag(value, ctx.env.RILL_DATA_KEY);
     mappings.set(tag, value);
     return tag;
   };

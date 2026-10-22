@@ -14,13 +14,17 @@ The production dependency audit reports zero known vulnerabilities. Local verifi
 8. **Third-party opt-in.** AI generation/search requires explicit recommendation enablement, not merely a saved key/model. Letterboxd→StremThru requires the new `thirdParty.letterboxd` checkbox and defaults off, including legacy configurations without that toggle. Existing explicitly enabled recommendations remain enabled.
 
 9. **Review follow-up.**
-   - Anonymous Jellyfin image requests are served only by `tag`. Tags are issued only in signed-in responses. Item IDs carry a public checksum, so anyone can forge one, and resolving a forged ID would spend the owner's add-on, TMDB and D1 quota.
+   - Anonymous Jellyfin item and profile-avatar image requests are served only by `tag`. Tags are issued only in signed-in responses. They are HMACs keyed from `RILL_DATA_KEY`, so nobody can compute the tag of a known artwork URL. Older digest tags are purged once by migration marker `hardening:image-tags-v2`. Item IDs carry a public checksum, so anyone can forge one, and resolving a forged ID would spend the owner's add-on, TMDB and D1 quota.
    - `/Users/Public` returns an empty list, so login screens don't reveal profile names.
    - Changing the username or password, and `/api/account/logout-all`, require the current password. These checks share the login throttle, so a stolen session cannot be turned into a permanent takeover or used to guess the password.
    - New passwords need at least 12 characters. Existing shorter passwords keep working until changed.
-   - Login lockout follows OWASP's device-cookie pattern. A successful owner sign-in sets an HMAC-signed `__Host-rill_device` cookie, valid 180 days. Its key is derived from `RILL_DATA_KEY`. Attempts carrying a valid device cookie use that device's own bucket, so failed guesses from elsewhere cannot lock the owner out of settings. Other attempts still share the per-IP and owner-account buckets. Jellyfin apps don't keep cookies, so signing in a new app can still be delayed during an attack. Existing app tokens are unaffected.
+   - Login lockout follows OWASP's device-cookie pattern. A successful owner sign-in sets an HMAC-signed `__Host-rill_device` cookie, valid 180 days. Its key is derived from `RILL_DATA_KEY`. The cookie carries `auth_generation`, so a password change or log-out-everywhere invalidates every other device cookie. Attempts carrying a valid device cookie use that device's own bucket, so failed guesses from elsewhere cannot lock the owner out of settings. Other attempts still share the per-IP and owner-account buckets. Jellyfin apps don't keep cookies, so signing in a new app can still be delayed during an attack. Existing app tokens are unaffected.
    - The owner session cookie is `__Host-rill_owner` on HTTPS. After upgrading, sign in again once.
    - The settings page sends a CSP: `default-src 'none'`, only its own inline script allowed by SHA-256 hash, `connect-src 'self'`, `frame-ancestors 'none'`. It also sends `X-Frame-Options: DENY` and `Cross-Origin-Opener-Policy`.
+   - Every response sends `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and, on HTTPS, `Strict-Transport-Security`.
+   - The settings page accepts only `https:` artwork URLs, matching what the server will fetch.
+   - Still reachable without a login, because Jellyfin apps need them before sign-in: `/System/Info/Public` (server name, version and ID), `/System/Ping`, Quick Connect start and polling, the login endpoints, `/Branding/*` (no content), the settings page and its logo, and `/api/account/status`. Stremio routes need a capability URL.
+   - Known trade-off: someone holding a stolen session but no device cookie can keep the shared account bucket throttled by failing `currentPassword` checks. Browsers with a device cookie are unaffected, and changing the password from one ends the stolen session.
    - Trakt and Simkl verification links are accepted only as `https:` URLs.
    - hono is updated to 4.13.13 for GHSA-5r4p-p66f-jhc7. That advisory concerns `serveStatic`, which is unused here.
    - Password hashing remains PBKDF2-SHA256 at 100,000 iterations. A local workerd run accepted 600,000 iterations, but production Workers limits and CPU cost on the free plan were not verified. Raising the count needs a versioned hash so existing hashes keep verifying.
@@ -71,7 +75,7 @@ npm run deploy
 ## Verification recorded for this patch
 
 - `npm run typecheck`: pass.
-- `npm test`: 32 passing tests; all HTTP/DNS/provider fixtures mocked, all D1 tests use in-memory SQLite.
+- `npm test`: 38 passing tests; all HTTP/DNS/provider fixtures mocked, all D1 tests use in-memory SQLite.
 - `npm audit --omit=dev`: zero known vulnerabilities.
 - `npm run build`: pass; verifies local compiler/tests and writes a source receipt.
 - Local esbuild Worker bundle with SQL/binary loaders: pass (`output/hardening/worker.mjs`, ignored generated output).

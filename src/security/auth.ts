@@ -25,18 +25,21 @@ export function readCookie(req: Request, name: string): string { return req.head
 const DEVICE_DAYS = 180;
 const deviceCookie = (url: string) => url.startsWith('https:') ? '__Host-rill_device' : 'rill_device';
 async function deviceSecret(env: Env): Promise<string | null> { return env.RILL_DATA_KEY ? hmac(env.RILL_DATA_KEY, 'rill:device-cookie:v1') : null; }
+// The signed payload carries auth_generation, so a password change or log-out-everywhere retires every device cookie.
 export async function trustedDevice(env: Env, req: Request): Promise<string | null> {
-    const secret = await deviceSecret(env), [id, exp, sig] = readCookie(req, deviceCookie(req.url)).split('.');
-    if (!secret || !id || !exp || !sig || !/^[A-Za-z0-9_-]{22}$/.test(id) || !(Number(exp) > Date.now()))
+    const secret = await deviceSecret(env), [id, exp, g, sig] = readCookie(req, deviceCookie(req.url)).split('.');
+    if (!secret || !id || !exp || !g || !sig || !/^[A-Za-z0-9_-]{22}$/.test(id) || !(Number(exp) > Date.now()))
         return null;
-    return timingSafeEqual(await hmac(secret, `${id}.${exp}`), sig) ? id : null;
+    if (!timingSafeEqual(await hmac(secret, `${id}.${exp}.${g}`), sig) || Number(g) !== await generation(env))
+        return null;
+    return id;
 }
 export async function deviceSetCookie(env: Env, req: Request): Promise<string | null> {
     const secret = await deviceSecret(env);
     if (!secret)
         return null;
-    const id = (await trustedDevice(env, req)) ?? b64urlEncode(crypto.getRandomValues(new Uint8Array(16))), exp = Date.now() + DEVICE_DAYS * 86400000;
-    return `${deviceCookie(req.url)}=${id}.${exp}.${await hmac(secret, `${id}.${exp}`)}; Path=/; Max-Age=${DEVICE_DAYS * 86400}; HttpOnly; SameSite=Strict${req.url.startsWith('https:') ? '; Secure' : ''}`;
+    const id = b64urlEncode(crypto.getRandomValues(new Uint8Array(16))), exp = Date.now() + DEVICE_DAYS * 86400000, g = await generation(env);
+    return `${deviceCookie(req.url)}=${id}.${exp}.${g}.${await hmac(secret, `${id}.${exp}.${g}`)}; Path=/; Max-Age=${DEVICE_DAYS * 86400}; HttpOnly; SameSite=Strict${req.url.startsWith('https:') ? '; Secure' : ''}`;
 }
 async function throttleKeys(env: Env, req: Request): Promise<string[]> {
     const device = await trustedDevice(env, req);

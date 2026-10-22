@@ -9,7 +9,7 @@ const origin='https://rill.example';
 function env(){return {DB:new D1(),RILL_DATA_KEY:Buffer.alloc(32,9).toString('base64'),RILL_SETUP_TOKEN:'test-provision',RILL_SECRET:'test-signing-key'};}
 function req(path,body={},cookie='',extra={}) {return new Request(origin+path,{method:'POST',headers:{origin,'content-type':'application/json','cf-connecting-ip':'203.0.113.50',...(cookie?{cookie}:{}),...extra},body:JSON.stringify(body)});}
 const cookies=res=>res.headers.getSetCookie().map(c=>c.split(';')[0]);
-async function setup(e,config={}){const res=await worker.fetch(req('/api/account/save',{setupToken:e.RILL_SETUP_TOKEN,config:{...config,jellyfin:{username:'owner',password:'correct-password'}}}),e);assert.equal(res.status,200);return {res,cookie:cookies(res).find(c=>c.startsWith('__Host-rill_owner=')),data:await res.json()};}
+async function setup(e,config={}){const res=await worker.fetch(req('/api/account/save',{setupToken:e.RILL_SETUP_TOKEN,config:{...config,jellyfin:{...config.jellyfin,username:'owner',password:'correct-password'}}}),e);assert.equal(res.status,200);return {res,cookie:cookies(res).find(c=>c.startsWith('__Host-rill_owner=')),data:await res.json()};}
 async function mockFetch(handler,work){const original=globalThis.fetch,calls=[];globalThis.fetch=async(url,init)=>{calls.push(String(url));if(String(url).startsWith('https://cloudflare-dns.com/'))return new Response(JSON.stringify({Status:0,Answer:[{type:1,data:'8.8.8.8'}]}));return handler(String(url),init);};try{return await work(calls);}finally{globalThis.fetch=original;}}
 
 test('owner cookies use __Host- names; setup also issues a device cookie',async()=>{
@@ -68,6 +68,57 @@ test('provider verification links must be https',async()=>{
  const e=env();const {cookie}=await setup(e);
  await mockFetch(()=>new Response(JSON.stringify({device_code:'d',user_code:'u',verification_url:'javascript:alert(1)',expires_in:600,interval:5})),async()=>{
   const res=await worker.fetch(req('/api/oauth/trakt/device',{clientId:'id'},cookie),e);assert.equal(res.status,200);assert.equal((await res.json()).verificationUrl,'https://trakt.tv/activate');
+ });
+ e.DB.close();
+});
+test('image tags are keyed: a tag computed from a public URL without the data key does not resolve',async()=>{
+ const {artworkTag,imageTaggedJson,imageUrlByTag}=await import('../src/jellyfin/image-tags.ts');
+ const e=env();await setup(e);const url='https://image.tmdb.org/t/p/w500/public-poster.jpg';
+ const ctx={cfg:{},env:e,scope:'owner',cfgToken:'',origin,lang:'en',tmdbKey:undefined};
+ const json=await imageTaggedJson(ctx,{ImageTags:{Primary:url}},(k,v)=>v);const issued=JSON.parse(json).ImageTags.Primary;
+ assert.equal(issued,artworkTag(url,e.RILL_DATA_KEY));assert.notEqual(issued,artworkTag(url));assert.notEqual(issued,artworkTag(url,Buffer.alloc(32,1).toString('base64')));
+ assert.equal(await imageUrlByTag(ctx,issued),url);assert.equal(await imageUrlByTag(ctx,artworkTag(url)),null);
+ e.DB.close();
+});
+test('every response carries baseline security headers',async()=>{
+ const e=env();
+ for(const path of ['/System/Info/Public','/logo.svg','/nope'])
+  {const res=await worker.fetch(new Request(origin+path),e);assert.equal(res.headers.get('x-content-type-options'),'nosniff',path);assert.equal(res.headers.get('referrer-policy'),'no-referrer',path);assert.match(res.headers.get('strict-transport-security')??'',/max-age=/,path);}
+ e.DB.close();
+});
+test('device cookies die with a password change and still throttle their own bucket',async()=>{
+ const e=env();const {cookie,data}=await setup(e);
+ const login=await worker.fetch(req('/api/account/login',{username:'owner',password:'correct-password'}),e);const stolen=cookies(login).find(c=>c.startsWith('__Host-rill_device='));
+ const statuses=[];for(let i=0;i<7;i++)statuses.push((await worker.fetch(req('/api/account/login',{username:'owner',password:'wrong'},stolen),e)).status);assert.ok(statuses.includes(429),String(statuses));
+ // Strangers' account bucket is untouched by the device bucket's failures and successes.
+ const changed=await worker.fetch(req('/api/account/save',{currentPassword:'correct-password',config:{...data.config,jellyfin:{...data.config.jellyfin,password:'rotated-password'}}},cookie),e);assert.equal(changed.status,200);
+ assert.ok(cookies(changed).some(c=>c.startsWith('__Host-rill_device=')));
+ for(let i=0;i<8;i++)await worker.fetch(req('/api/account/login',{username:'owner',password:'wrong'},'',{'cf-connecting-ip':`198.51.100.${i+1}`}),e);
+ // The pre-change device cookie no longer escapes the shared lockout.
+ assert.equal((await worker.fetch(req('/api/account/login',{username:'owner',password:'rotated-password'},stolen,{'cf-connecting-ip':'198.51.100.200'}),e)).status,429);
+ assert.equal((await worker.fetch(req('/api/account/login',{username:'owner',password:'rotated-password'},cookies(changed).find(c=>c.startsWith('__Host-rill_device=')),{'cf-connecting-ip':'198.51.100.200'}),e)).status,200);
+ e.DB.close();
+});
+test('plain-HTTP development keeps unprefixed, non-Secure cookies',async()=>{
+ const e=env();const local='http://localhost:8787';
+ const res=await worker.fetch(new Request(local+'/api/account/save',{method:'POST',headers:{origin:local,'content-type':'application/json'},body:JSON.stringify({setupToken:e.RILL_SETUP_TOKEN,config:{jellyfin:{username:'owner',password:'correct-password'}}})}),e);
+ assert.equal(res.status,200);const set=res.headers.getSetCookie();
+ assert.ok(set.some(c=>c.startsWith('rill_owner=')&&!/Secure/.test(c)));assert.ok(set.some(c=>c.startsWith('rill_device=')&&!/Secure/.test(c)));
+ e.DB.close();
+});
+test('anonymous profile avatar requests need an issued tag',async()=>{
+ const e=env();await setup(e,{jellyfin:{profiles:[{id:'kid',name:'kid',avatar:'https://img.example/a.png',sharesHistory:false}]}});
+ await mockFetch(()=>new Response('x'),async calls=>{
+  const {sha256}=await import('../src/util/bytes.ts');const scope=(await sha256((await readOwner(e)).installation_key)).slice(0,32);
+  const uid=(await sha256(`rill:jellyfin:profile:${scope}:kid`)).slice(0,32);
+  const res=await worker.fetch(new Request(`${origin}/Users/${uid}/Images/Primary`),e);assert.equal(res.status,404);assert.deepEqual(calls,[]);
+ });
+ e.DB.close();
+});
+test('Simkl verification links must be https too',async()=>{
+ const e=env();const {cookie}=await setup(e);
+ await mockFetch(()=>new Response(JSON.stringify({result:'OK',user_code:'ABC',verification_url:'data:text/html,x'})),async()=>{
+  const res=await worker.fetch(req('/api/oauth/simkl/pin',{clientId:'id'},cookie),e);assert.equal(res.status,200);assert.equal((await res.json()).verificationUrl,'https://simkl.com/pin');
  });
  e.DB.close();
 });

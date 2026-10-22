@@ -108,7 +108,7 @@ test('legacy owner username remains saveable without renaming',async()=>{
 test('provider artwork URLs are encrypted in image mappings and legacy caches purged',async()=>{
  const {imageTaggedJson,imageUrlByTag,artworkTag}=await import('../src/jellyfin/image-tags.ts');
  const e=env();await ensureSchema(e.DB);
- const url='https://api.ratingposterdb.com/private-rpdb-key/imdb/poster-default/tt123.jpg';const tag=artworkTag(url);
+ const url='https://api.ratingposterdb.com/private-rpdb-key/imdb/poster-default/tt123.jpg';const tag=artworkTag(url,e.RILL_DATA_KEY);
  await e.DB.prepare('INSERT INTO image_tags(tag,url,created) VALUES(?,?,?)').bind(tag,url,0).run();
  await e.DB.prepare('INSERT INTO presentations(key,value,expires) VALUES(?,?,?)').bind('legacy',JSON.stringify({ImageTags:{Primary:url}}),Date.now()+60000).run();
  await migrateSecrets(e);assert.equal((await e.DB.prepare('SELECT count(*) AS n FROM image_tags').first()).n,0);assert.equal((await e.DB.prepare('SELECT count(*) AS n FROM presentations').first()).n,0);

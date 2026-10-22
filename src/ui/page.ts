@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { BRAND_LOGO, BRAND_VERSION } from '../brand';
 import { DEFAULT_CONFIG } from '../config/schema';
 
@@ -1095,18 +1096,19 @@ const JS = String.raw`
     });
   }
   // Username and password changes are explicit and need the current password; autosave never sends them.
+  var jfUserEdited = false;
+  $('jf-user').addEventListener('input', function () { jfUserEdited = true; });
   $('jf-credentials').addEventListener('click', function () {
     var status = $('jf-cred-status'), user = $('jf-user').value.trim(), pass = $('jf-pass').value, current = $('jf-current').value;
     if (!/^[a-z0-9._-]{1,32}$/i.test(user)) { status.textContent = 'Username: letters, numbers, dot, dash or underscore.'; return; }
     if (pass && pass.length < 12) { status.textContent = 'Use at least 12 characters.'; return; }
     if (!pass && user === cfg.jellyfin.username) { status.textContent = 'Nothing to change.'; return; }
     if (!current) { status.textContent = 'Enter your current password.'; return; }
-    clearTimeout(saveTimer);
     status.textContent = 'Updating…';
     var next = clone(cfg); next.jellyfin.username = user; next.jellyfin.password = pass;
     api('/api/account/save', { config: next, currentPassword: current }).then(function (r) {
       if (r.error) { status.textContent = r.error; return; }
-      $('jf-pass').value = ''; $('jf-current').value = '';
+      $('jf-pass').value = ''; $('jf-current').value = ''; jfUserEdited = false;
       account.username = r.username || user;
       if (r.config) { cfg = merge(DEFAULTS, r.config); fillInputs(); renderTrackerStates(); refreshNeeds(); }
       if (r.token) token = r.token;
@@ -1322,7 +1324,7 @@ const JS = String.raw`
   function showExport(list){var box=$('collection-export-text');box.value=exportText(list);box.hidden=false;box.focus();box.select();try{navigator.clipboard.writeText(box.value);}catch(e){}}
   var collectionArtTarget=null;
   var ART_SHAPES=[['poster','Portrait','2:3'],['square','Square','1:1'],['landscape','Landscape','16:9']];
-  function artworkUrl(value) {try {var u=new URL(value);return ['http:','https:'].includes(u.protocol)?u.href:'';}catch(_){return '';}}
+  function artworkUrl(value) {try {var u=new URL(value);return u.protocol==='https:'?u.href:'';}catch(_){return '';}}
   function coverShape(col) {return col.coverShape || (col.cover?'poster':col.backdrop?'landscape':'poster');}
   function artworkImage(url,name,shape,extra) {
     var frame=el('div',{class:'art-image '+(extra || ''),'data-shape':shape || 'poster'});
@@ -1703,7 +1705,7 @@ const JS = String.raw`
     all('[data-arr]').forEach(function (n) { n.checked = (get(n.getAttribute('data-arr')) || []).indexOf(n.value) >= 0; });
     all('[data-lines]').forEach(function (n) { n.value = (get(n.getAttribute('data-lines')) || []).join('\n'); });
     all('[data-ui]').forEach(function (n) { n.value = get(n.getAttribute('data-ui'), ui) || ''; });
-    $('jf-user').value = cfg.jellyfin.username || '';
+    if (!jfUserEdited) $('jf-user').value = cfg.jellyfin.username || '';
     all('[data-order]').forEach(renderOrder);
     enhanceSelects();
     applyMode();
@@ -2186,19 +2188,19 @@ function pageScript(): string {
   return JS.replace('__DEFAULTS__', JSON.stringify(DEFAULT_CONFIG).replace(/</g, '\\u003c'));
 }
 
-let policy: Promise<string> | undefined;
+let policy: string | undefined;
 /** Only the page's own inline script may run; the page cannot be framed, post forms or call other origins. */
-export function pagePolicy(): Promise<string> {
-  policy ??= crypto.subtle.digest('SHA-256', new TextEncoder().encode(pageScript())).then(digest => [
+export function pagePolicy(): string {
+  policy ??= [
     "default-src 'none'",
-    `script-src 'sha256-${btoa(String.fromCharCode(...new Uint8Array(digest)))}'`,
+    `script-src 'sha256-${createHash('sha256').update(pageScript()).digest('base64')}'`,
     "style-src 'unsafe-inline'",
     "img-src 'self' https: data: blob:",
     "connect-src 'self'",
     "base-uri 'none'",
     "form-action 'none'",
     "frame-ancestors 'none'",
-  ].join('; '));
+  ].join('; ');
   return policy;
 }
 

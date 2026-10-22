@@ -1067,8 +1067,9 @@ inner.on('HEAD', '/items/:id/images/:type/:index', imageHandler);
 async function profileImage(c: C): Promise<Response> {
   const jf = c.get('jf');
   if (c.req.param('type')?.toLowerCase() !== 'primary' || (c.req.param('index') ?? jf.q('imageIndex') ?? '0') !== '0') return c.body(null, 404);
-  const profile = (await profileUsers(jf.ctx)).find(p => p.who.userId === plainGuid(c.req.param('uid')));
-  const url = profile?.ctx.profile?.avatar;
+  // As with item images, anonymous requests need a tag that was issued to a signed-in client.
+  const profile = jf.claims ? (await profileUsers(jf.ctx)).find(p => p.who.userId === plainGuid(c.req.param('uid'))) : undefined;
+  const url = await imageUrlByTag(jf.ctx, jf.q('tag')) ?? profile?.ctx.profile?.avatar;
   return url ? imageResponse(jf, c.req.raw, url, 'primary') : c.body(null,404);
 }
 inner.get('/users/:uid/images/:type',profileImage);

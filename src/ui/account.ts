@@ -130,7 +130,8 @@ export function mountAccountRoutes(router: Hono<{
         const ctx = await buildCtx(cfg, c.env, new URL(c.req.url).origin);
         await registerAccount(ctx, true);
         c.header('Set-Cookie', setCookie(ctx.origin, await mintSession(c.env, c.req.raw, (await readOwner(c.env))!), SESSION_DAYS * 86400));
-        const device = owner ? null : await deviceSetCookie(c.env, c.req.raw);
+        // Setup and credential changes bump or start a generation; give this browser a device cookie for it.
+        const device = !owner || password || username !== owner.username ? await deviceSetCookie(c.env, c.req.raw) : null;
         if (device)
             c.header('Set-Cookie', device, { append: true });
         return c.json({ config: publicConfig(cfg), token: await addonCapability(ctx), username });
@@ -144,6 +145,9 @@ export function mountAccountRoutes(router: Hono<{
             return denied;
         await c.env.DB!.prepare('UPDATE owner SET auth_generation=auth_generation+1 WHERE id=1').run();
         c.header('Set-Cookie', setCookie(new URL(c.req.url).origin, '', 0));
+        const device = await deviceSetCookie(c.env, c.req.raw);
+        if (device)
+            c.header('Set-Cookie', device, { append: true });
         return c.json({ ok: true });
     });
     router.post('/api/account/logout', async (c) => {

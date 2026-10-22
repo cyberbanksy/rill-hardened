@@ -54,7 +54,7 @@ test('owner and Jellyfin sessions revoke on password change and logout-all; norm
  const owner=await readOwner(e),scope=(await sha256(owner.installation_key)).slice(0,32),row=await e.DB.prepare('SELECT config FROM accounts').first();const cfg=await loadConfig(row.config,e,scope);
  const ctx={cfg,env:e,scope,cfgToken:'',origin,lang:'en',tmdbKey:cfg.keys.tmdb};assert.ok(await verifyToken(ctx,bearer));
  const qc=await startQuickConnect(ctx,{client:'test',device:'test',deviceId:'test',version:'1'});assert.ok(await approveQuickConnect(ctx,qc.code));
- const rotated=await worker.fetch(req('/api/account/save',{config:{...data.config,jellyfin:{...data.config.jellyfin,password:'new-password'}}},cookie),e);assert.equal(rotated.status,200);const newCookie=rotated.headers.get('set-cookie').split(';')[0];
+ const rotated=await worker.fetch(req('/api/account/save',{currentPassword:'correct-password',config:{...data.config,jellyfin:{...data.config.jellyfin,password:'new-password'}}},cookie),e);assert.equal(rotated.status,200);const newCookie=rotated.headers.get('set-cookie').split(';')[0];
  assert.equal(await verifyToken(ctx,bearer),null);assert.equal(await claimQuickConnect(ctx,qc.secret),null);
  assert.equal((await worker.fetch(req('/api/account/load',{},cookie),e)).status,401);
  assert.equal((await worker.fetch(req('/Users/AuthenticateByName',{Username:'owner',Pw:'correct-password'}),e)).status,401);
@@ -62,7 +62,8 @@ test('owner and Jellyfin sessions revoke on password change and logout-all; norm
  assert.equal((await worker.fetch(req('/api/account/logout',{},newCookie),e)).status,200);
  assert.equal((await worker.fetch(req('/api/account/load',{},newCookie),e)).status,401);
  const relog=await worker.fetch(req('/api/account/login',{username:'owner',password:'new-password'}),e);assert.equal(relog.status,200);const relogCookie=relog.headers.get('set-cookie').split(';')[0];const fresh=await mintToken(ctx,'user','device');
- assert.equal((await worker.fetch(req('/api/account/logout-all',{},relogCookie),e)).status,200);assert.equal(await verifyToken(ctx,fresh),null);
+ assert.equal((await worker.fetch(req('/api/account/logout-all',{},relogCookie),e)).status,403);assert.ok(await verifyToken(ctx,fresh));
+ assert.equal((await worker.fetch(req('/api/account/logout-all',{currentPassword:'new-password'},relogCookie),e)).status,200);assert.equal(await verifyToken(ctx,fresh),null);
  assert.equal((await worker.fetch(new Request(`${origin}/${data.token}/manifest.json`),e)).status,400);
  e.DB.close();
 });

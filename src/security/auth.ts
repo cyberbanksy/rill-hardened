@@ -1,5 +1,5 @@
 import type { Env } from '../env';
-import { b64urlEncode, sha256, timingSafeEqual } from '../util/bytes';
+import { b64urlEncode, hmac, sha256, timingSafeEqual } from '../util/bytes';
 export interface OwnerRow {
     installation_key: string;
     username: string;
@@ -19,10 +19,33 @@ export async function claimOwner(env: Env, installation: string, username: strin
     const result = await env.DB!.prepare('INSERT OR IGNORE INTO owner(id,installation_key,username,password_hash,salt,created) VALUES(1,?,?,?,?,?)').bind(installation, username, hash, salt, Date.now()).run();
     return result.meta.changes === 1;
 }
+export function readCookie(req: Request, name: string): string { return req.headers.get('cookie')?.split(';').map(p => p.trim()).find(p => p.startsWith(name + '='))?.slice(name.length + 1) ?? ''; }
+// Device cookies (OWASP lockout guidance): a browser that has signed in before gets its own throttle bucket,
+// so failed guesses from elsewhere cannot lock the owner out of the settings page.
+const DEVICE_DAYS = 180;
+const deviceCookie = (url: string) => url.startsWith('https:') ? '__Host-rill_device' : 'rill_device';
+async function deviceSecret(env: Env): Promise<string | null> { return env.RILL_DATA_KEY ? hmac(env.RILL_DATA_KEY, 'rill:device-cookie:v1') : null; }
+export async function trustedDevice(env: Env, req: Request): Promise<string | null> {
+    const secret = await deviceSecret(env), [id, exp, sig] = readCookie(req, deviceCookie(req.url)).split('.');
+    if (!secret || !id || !exp || !sig || !/^[A-Za-z0-9_-]{22}$/.test(id) || !(Number(exp) > Date.now()))
+        return null;
+    return timingSafeEqual(await hmac(secret, `${id}.${exp}`), sig) ? id : null;
+}
+export async function deviceSetCookie(env: Env, req: Request): Promise<string | null> {
+    const secret = await deviceSecret(env);
+    if (!secret)
+        return null;
+    const id = (await trustedDevice(env, req)) ?? b64urlEncode(crypto.getRandomValues(new Uint8Array(16))), exp = Date.now() + DEVICE_DAYS * 86400000;
+    return `${deviceCookie(req.url)}=${id}.${exp}.${await hmac(secret, `${id}.${exp}`)}; Path=/; Max-Age=${DEVICE_DAYS * 86400}; HttpOnly; SameSite=Strict${req.url.startsWith('https:') ? '; Secure' : ''}`;
+}
+async function throttleKeys(env: Env, req: Request): Promise<string[]> {
+    const device = await trustedDevice(env, req);
+    return device ? [`device:${device}`] : [`ip:${await sha256(req.headers.get('cf-connecting-ip') ?? 'unknown')}`, 'account:owner'];
+}
 export async function loginThrottle(env: Env, req: Request): Promise<number> {
     if (!env.DB)
         return 60;
-    const admission = crypto.randomUUID(), now = Date.now(), keys = [`ip:${await sha256(req.headers.get('cf-connecting-ip') ?? 'unknown')}`, 'account:owner'];
+    const admission = crypto.randomUUID(), now = Date.now(), keys = await throttleKeys(env, req);
     // Count attempts before hashing. Each UPSERT is atomic, including concurrent bad guesses.
     const rows = await env.DB.batch(keys.map(key => env.DB!.prepare(`INSERT INTO login_limits(key,failures,window_start,blocked_until,admission) VALUES(?,1,?,0,?)
  ON CONFLICT(key) DO UPDATE SET
@@ -36,7 +59,12 @@ export async function loginThrottle(env: Env, req: Request): Promise<number> {
         admission: string;
     }; return row?.admission === admission ? 0 : Math.ceil((Number(row?.blocked_until ?? 0) - now) / 1000); }));
 }
-export async function resetLogin(env: Env): Promise<void> { await env.DB?.prepare("DELETE FROM login_limits WHERE key='account:owner'").run(); }
+export async function resetLogin(env: Env, req: Request): Promise<void> {
+    if (!env.DB)
+        return;
+    const keys = await throttleKeys(env, req);
+    await env.DB.batch(keys.map(key => env.DB!.prepare('DELETE FROM login_limits WHERE key=?').bind(key)));
+}
 export async function helperQuota(env: Env, scope: string, kind: string, max = 60, window = 60000): Promise<boolean> {
     if (!env.DB)
         return false;

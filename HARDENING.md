@@ -13,6 +13,18 @@ The production dependency audit reports zero known vulnerabilities. Local verifi
 7. **Secret storage and responses.** Owner passwords are verified with the existing salted PBKDF2-SHA256 hash and removed from both encoded and decoded configs. Jellyfin checks that owner hash, preserving profile login names. `RILL_DATA_KEY` is a separate 32-byte base64 Worker secret used for AES-GCM with fresh 96-bit nonces and purpose/scope authenticated data. Account and recommendation-job configs, tracker refresh credentials, MovieLens session cookies, generated signing keys, image-tag URL mappings, presentation data and durable/edge metadata caches are encrypted. First-run migration encrypts existing authoritative rows with compare-and-swap writes; disposable legacy caches/image/presentation mappings are purged. A durable completion marker makes migration idempotent across cold starts. Settings return nonsecret saved markers and opaque add-on references; blank/marked secret inputs preserve existing values. OAuth tokens are stored server-side and returned only as saved markers. Public config-bearing legacy URLs/imports are rejected; replacement Stremio install URLs are random, generation-bound, 30-day capabilities. Nameless manifests use “Add-on”. HTTP errors/logs omit raw exceptions/URLs; Worker observability is disabled to avoid request-path/query token capture.
 8. **Third-party opt-in.** AI generation/search requires explicit recommendation enablement, not merely a saved key/model. Letterboxd→StremThru requires the new `thirdParty.letterboxd` checkbox and defaults off, including legacy configurations without that toggle. Existing explicitly enabled recommendations remain enabled.
 
+9. **Review follow-up.**
+   - Anonymous Jellyfin image requests are served only by `tag`. Tags are issued only in signed-in responses. Item IDs carry a public checksum, so anyone can forge one, and resolving a forged ID would spend the owner's add-on, TMDB and D1 quota.
+   - `/Users/Public` returns an empty list, so login screens don't reveal profile names.
+   - Changing the username or password, and `/api/account/logout-all`, require the current password. These checks share the login throttle, so a stolen session cannot be turned into a permanent takeover or used to guess the password.
+   - New passwords need at least 12 characters. Existing shorter passwords keep working until changed.
+   - Login lockout follows OWASP's device-cookie pattern. A successful owner sign-in sets an HMAC-signed `__Host-rill_device` cookie, valid 180 days. Its key is derived from `RILL_DATA_KEY`. Attempts carrying a valid device cookie use that device's own bucket, so failed guesses from elsewhere cannot lock the owner out of settings. Other attempts still share the per-IP and owner-account buckets. Jellyfin apps don't keep cookies, so signing in a new app can still be delayed during an attack. Existing app tokens are unaffected.
+   - The owner session cookie is `__Host-rill_owner` on HTTPS. After upgrading, sign in again once.
+   - The settings page sends a CSP: `default-src 'none'`, only its own inline script allowed by SHA-256 hash, `connect-src 'self'`, `frame-ancestors 'none'`. It also sends `X-Frame-Options: DENY` and `Cross-Origin-Opener-Policy`.
+   - Trakt and Simkl verification links are accepted only as `https:` URLs.
+   - hono is updated to 4.13.13 for GHSA-5r4p-p66f-jhc7. That advisory concerns `serveStatic`, which is unused here.
+   - Password hashing remains PBKDF2-SHA256 at 100,000 iterations. A local workerd run accepted 600,000 iterations, but production Workers limits and CPU cost on the free plan were not verified. Raising the count needs a versioned hash so existing hashes keep verifying.
+
 ## Upgrade and compatibility
 
 - Existing D1 owners do not need `RILL_SETUP_TOKEN`; that secret is only for an unclaimed instance. Empty password fields retain the current hash. Existing sessions lack a generation and will require sign-in after this upgrade. Password changes/log-out-all also revoke Stremio capabilities; re-create the install URL as needed.
@@ -59,7 +71,7 @@ npm run deploy
 ## Verification recorded for this patch
 
 - `npm run typecheck`: pass.
-- `npm test`: 24 passing tests; all HTTP/DNS/provider fixtures mocked, all D1 tests use in-memory SQLite.
+- `npm test`: 32 passing tests; all HTTP/DNS/provider fixtures mocked, all D1 tests use in-memory SQLite.
 - `npm audit --omit=dev`: zero known vulnerabilities.
 - `npm run build`: pass; verifies local compiler/tests and writes a source receipt.
 - Local esbuild Worker bundle with SQL/binary loaders: pass (`output/hardening/worker.mjs`, ignored generated output).

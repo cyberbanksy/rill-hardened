@@ -57,7 +57,7 @@ The build runs the type check and tests before it deploys. Tables are created on
 ### 3. Claim it
 
 - In the [Cloudflare dashboard](https://dash.cloudflare.com/), open **Workers & Pages**, select your Worker, and open its `workers.dev` address.
-- Enter your setup token, then make a username and a password of at least 8 characters. This account is separate from GitHub and Cloudflare.
+- Enter your setup token, then make a username and a password of at least 12 characters. This account is separate from GitHub and Cloudflare.
 - Add your add-ons on the settings page.
 
 ### 4. Sign in from a Jellyfin app

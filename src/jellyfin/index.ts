@@ -259,7 +259,7 @@ inner.post('/users/authenticatebyname', async (c) => {
   const profile = jf.ctx.cfg.jellyfin.profiles?.find(p => p.name.toLowerCase() === String(username ?? '').trim().toLowerCase());
   const loginCtx = profile ? {...jf.ctx,cfg:{...jf.ctx.cfg,jellyfin:{...jf.ctx.cfg.jellyfin,username:profile.name}}} : jf.ctx;
   if (!await credentialsMatch(loginCtx, username, password)) return reply(c, { Message: 'Invalid username or password' }, 401);
-  await resetLogin(jf.ctx.env);
+  await resetLogin(jf.ctx.env,c.req.raw);
   jf.ctx = profileContext(jf.ctx,profile?.id)!;
   jf.who = await identityOf(jf.ctx);
   return signIn(c);
@@ -297,7 +297,8 @@ inner.post('/tracking/retry', async c => {
   return c.json({queued:result.meta.changes});
 });
 
-inner.get('/users/public', async (c) => reply(c,(await profileUsers(c.get('jf').ctx)).map(p => userDto(p.ctx,p.who))));
+// Like Jellyfin's "hide from login screen": listing names would hand out half of every login.
+inner.get('/users/public', (c) => reply(c,[]));
 inner.get('/users/me', (c) => {
   const jf = c.get('jf');
   return reply(c, userDto(jf.ctx, jf.who));
@@ -1054,7 +1055,9 @@ async function imageHandler(c: C): Promise<Response> {
   const index = c.req.param('index') ?? jf.q('imageIndex') ?? '0';
   if (!decodeGuid(id) || !['primary','backdrop','logo','thumb','banner','art'].includes(type) || index !== '0') return c.body(null, 404);
   // Tags are opaque cache keys, never caller-supplied fetch destinations.
-  const url = await imageUrlByTag(jf.ctx, jf.q('tag')) ?? await imageUrlFor(lib(c), id, type);
+  // Item IDs are forgeable, so only signed-in requests may resolve artwork through add-ons and provider keys;
+  // anonymous image requests are limited to tags already issued in authenticated responses.
+  const url = await imageUrlByTag(jf.ctx, jf.q('tag')) ?? (jf.claims ? await imageUrlFor(lib(c), id, type) : null);
   return url ? imageResponse(jf, c.req.raw, url, type) : c.body(null, 404);
 }
 inner.get('/items/:id/images/:type', imageHandler);

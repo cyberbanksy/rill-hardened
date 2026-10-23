@@ -82,7 +82,9 @@ export async function imageResponse(jf: JfRequest, request: Request, url: string
   }
   // Quality is accepted as a client preference; original encoding and alpha are preserved.
   const source = sizedImage(url, kind, maxWidth);
-  const cacheKey = `${jf.ctx.origin}/.rill-images-v2/${jf.ctx.scope}/${artworkTag(source)}`;
+  // Keyed: the ETag is public, and source URLs can carry provider keys.
+  const tag = artworkTag(source, jf.ctx.env?.RILL_DATA_KEY);
+  const cacheKey = `${jf.ctx.origin}/.rill-images-v3/${jf.ctx.scope}/${tag}`;
   let response: Response | undefined;
   try { response = await caches.default.match(cacheKey); } catch {}
   if (!response) {
@@ -101,7 +103,7 @@ export async function imageResponse(jf: JfRequest, request: Request, url: string
     let bytes:Uint8Array;
     try {bytes=await readLimited(upstream.body,IMAGE_LIMIT);}catch{return new Response(null,{status:502});}
     const mime=rasterType(contentType,bytes);if(!mime)return new Response(null,{status:502,headers:{'cache-control':'no-store'}});
-    response=new Response(bytes,{headers:{...MEDIA_HEADERS,'content-type':mime,'cache-control':'public, max-age=86400',etag:`"${artworkTag(source)}"`}});
+    response=new Response(bytes,{headers:{...MEDIA_HEADERS,'content-type':mime,'cache-control':'public, max-age=86400',etag:`"${tag}"`}});
     if (jf.ctx.defer) jf.ctx.defer(caches.default.put(cacheKey, response.clone()).catch(() => {}));
   }
   const headers = new Headers(response.headers);

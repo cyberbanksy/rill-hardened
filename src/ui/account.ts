@@ -4,9 +4,9 @@ import type { Ctx } from '../context';
 import type { Env } from '../env';
 import { normalizeConfig, type RillConfig } from '../config/schema';
 import { registerAccount, stateDelete, stateGet, statePut } from '../storage/state';
-import { signingSecret } from '../jellyfin/auth';
+import { approveQuickConnect, signingSecret } from '../jellyfin/auth';
 import { b64urlDecode, b64urlEncode, hmac, sha256, timingSafeEqual } from '../util/bytes';
-import { readOwner, verifyPassword, passwordHash, claimOwner, loginThrottle, resetLogin, readCookie, deviceSetCookie, type OwnerRow } from '../security/auth';
+import { readOwner, verifyPassword, passwordHash, claimOwner, loginThrottle, resetLogin, readCookie, deviceSetCookie, helperQuota, type OwnerRow } from '../security/auth';
 import { loadConfig, mergePrivate, publicConfig, storeConfig } from '../security/secrets';
 import { limitedJson } from '../security/limits';
 const SESSION_DAYS = 30, MIN_PASSWORD = 12;
@@ -101,13 +101,22 @@ export function mountAccountRoutes(router: Hono<{
         if ((!owner || username !== owner.username) && !/^[a-z0-9._-]{1,32}$/i.test(username) || typeof password !== 'string' || password.length > 1024 || (!owner || password) && password.length < MIN_PASSWORD)
             return c.json({ error: `Set a valid username and a password of at least ${MIN_PASSWORD} characters.` }, 400);
         if (!owner) {
-            if (!c.env.RILL_SETUP_TOKEN || !timingSafeEqual(String(body.setupToken ?? ''), c.env.RILL_SETUP_TOKEN))
+            if (!c.env.RILL_SETUP_TOKEN || c.env.RILL_SETUP_TOKEN.trim().length < 32)
+                return c.json({ error: 'Set RILL_SETUP_TOKEN to the output of `openssl rand -hex 16`.' }, 503);
+            const retry = await loginThrottle(c.env, c.req.raw);
+            if (retry) {
+                c.header('Retry-After', String(retry));
+                return c.json({ error: 'Try again later.' }, 429);
+            }
+            // Compare digests so a wrong guess reveals nothing about the token's length.
+            if (!timingSafeEqual(await sha256(String(body.setupToken ?? '')), await sha256(c.env.RILL_SETUP_TOKEN.trim())))
                 return c.json({ error: 'A provisioning token is required.' }, 403);
             cfg.installationKey = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '').slice(0, 16);
             // Validate encryption key and config limits before claiming the singleton.
             await storeConfig(cfg, c.env, (await sha256(cfg.installationKey)).slice(0, 32));
             if (!await claimOwner(c.env, cfg.installationKey, username, password))
                 return c.json({ error: 'An owner already exists. Sign in.' }, 409);
+            await resetLogin(c.env, c.req.raw);
         }
         else {
             cfg.installationKey = owner.installation_key;
@@ -133,6 +142,20 @@ export function mountAccountRoutes(router: Hono<{
         if (device)
             c.header('Set-Cookie', device, { append: true });
         return c.json({ config: publicConfig(cfg), token: await addonCapability(ctx), username });
+    });
+    // Signs in a Jellyfin app from a browser that is already signed in, which the login lockout can't block.
+    router.post('/api/account/quickconnect', async (c) => {
+        const owner = await ownerSession(c.env, c.req.raw);
+        if (!owner)
+            return c.json({ error: 'Sign in first.' }, 401);
+        const cfg = await ownerConfig(c.env, owner);
+        if (!cfg)
+            return c.json({ error: 'Save server settings first.' }, 409);
+        const ctx = await buildCtx(cfg, c.env, new URL(c.req.url).origin);
+        if (!await helperQuota(c.env, ctx.scope, 'quickconnect-approve', 10))
+            return c.json({ error: 'Try again later.' }, 429);
+        const body = await limitedJson<Record<string, unknown>>(c.req.raw, 4096);
+        return await approveQuickConnect(ctx, String(body.code ?? '')) ? c.json({ ok: true }) : c.json({ error: 'That code is unknown or expired.' }, 404);
     });
     router.post('/api/account/logout-all', async (c) => {
         const owner = await ownerSession(c.env, c.req.raw);

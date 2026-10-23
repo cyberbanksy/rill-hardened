@@ -12,7 +12,7 @@ import {mintToken,verifyToken,startQuickConnect,approveQuickConnect,claimQuickCo
 import {renderPage} from '../src/ui/page.ts';
 import {Script} from 'node:vm';
 const origin='https://rill.example';
-function env(){return {DB:new D1(),RILL_DATA_KEY:Buffer.alloc(32,9).toString('base64'),RILL_SETUP_TOKEN:'test-provision',RILL_SECRET:'test-signing-key'};}
+function env(){return {DB:new D1(),RILL_DATA_KEY:Buffer.alloc(32,9).toString('base64'),RILL_SETUP_TOKEN:'0123456789abcdef0123456789abcdef',RILL_SECRET:'test-signing-key'};}
 function req(path,body={},cookie='',extra={}) {return new Request(origin+path,{method:'POST',headers:{origin,'content-type':'application/json','cf-connecting-ip':'203.0.113.50',...(cookie?{cookie}:{}),...extra},body:JSON.stringify(body)});}
 async function setup(e){const res=await worker.fetch(req('/api/account/save',{setupToken:e.RILL_SETUP_TOKEN,config:{jellyfin:{username:'owner',password:'correct-password'},addons:{stream:['https://addon.example/private-provider-key/manifest.json']},keys:{tmdb:'private-tmdb-key'},trackers:{trakt:{clientId:'id',accessToken:'private-tracker-token'}}}}),e);assert.equal(res.status,200);return {cookie:res.headers.get('set-cookie').split(';')[0],data:await res.json()};}
 
@@ -70,6 +70,8 @@ test('owner and Jellyfin sessions revoke on password change and logout-all; norm
 test('D1 progressive throttles share owner account across both login paths and IPs; quotas atomic',async()=>{
  const e=env();await setup(e);
  for(let i=0;i<5;i++)assert.equal((await worker.fetch(req('/api/account/login',{username:'owner',password:'wrong'}),e)).status,401);
+ assert.equal((await worker.fetch(req('/api/account/login',{username:'owner',password:'wrong'}),e)).status,429);
+ for(let i=0;i<17;i++)await worker.fetch(req('/Users/AuthenticateByName',{Username:'owner',Pw:'wrong'},'',{'cf-connecting-ip':`198.51.100.${i+1}`}),e);
  const blocked=await worker.fetch(req('/Users/AuthenticateByName',{Username:'owner',Pw:'wrong'},'',{'cf-connecting-ip':'203.0.113.51'}),e);assert.equal(blocked.status,429);assert.ok(Number(blocked.headers.get('retry-after'))>=1);
  const successes=await Promise.all(Array.from({length:8},()=>helperQuota(e,'owner','work',2,3600000)));assert.equal(successes.filter(Boolean).length,2);
  e.DB.close();

@@ -40,22 +40,26 @@ export async function deviceSetCookie(env: Env, req: Request): Promise<string | 
     const id = b64urlEncode(crypto.getRandomValues(new Uint8Array(16))), exp = Date.now() + DEVICE_DAYS * 86400000, g = await generation(env);
     return `${deviceCookie(req.url)}=${id}.${exp}.${g}.${await hmac(secret, `${id}.${exp}.${g}`)}; Path=/; Max-Age=${DEVICE_DAYS * 86400}; HttpOnly; SameSite=Strict${req.url.startsWith('https:') ? '; Secure' : ''}`;
 }
-async function throttleKeys(env: Env, req: Request): Promise<string[]> {
+type Bucket = { key: string; free: number; maxShift: number; cap: number };
+// The shared account bucket only slows distributed guessing; it starts late and stays short so nobody can hold it shut.
+async function throttleKeys(env: Env, req: Request): Promise<Bucket[]> {
     const device = await trustedDevice(env, req);
-    return device ? [`device:${device}`] : [`ip:${await sha256(req.headers.get('cf-connecting-ip') ?? 'unknown')}`, 'account:owner'];
+    if (device)
+        return [{ key: `device:${device}`, free: 4, maxShift: 8, cap: 300000 }];
+    return [{ key: `ip:${await sha256(req.headers.get('cf-connecting-ip') ?? 'unknown')}`, free: 4, maxShift: 8, cap: 300000 }, { key: 'account:owner', free: 19, maxShift: 5, cap: 30000 }];
 }
 export async function loginThrottle(env: Env, req: Request): Promise<number> {
     if (!env.DB)
         return 60;
     const admission = crypto.randomUUID(), now = Date.now(), keys = await throttleKeys(env, req);
     // Count attempts before hashing. Each UPSERT is atomic, including concurrent bad guesses.
-    const rows = await env.DB.batch(keys.map(key => env.DB!.prepare(`INSERT INTO login_limits(key,failures,window_start,blocked_until,admission) VALUES(?,1,?,0,?)
+    const rows = await env.DB.batch(keys.map(({ key, free, maxShift, cap }) => env.DB!.prepare(`INSERT INTO login_limits(key,failures,window_start,blocked_until,admission) VALUES(?,1,?,0,?)
  ON CONFLICT(key) DO UPDATE SET
  admission=CASE WHEN window_start<? OR blocked_until<=? THEN excluded.admission ELSE admission END,
  failures=CASE WHEN window_start<? THEN 1 WHEN blocked_until>? THEN failures ELSE failures+1 END,
  window_start=CASE WHEN window_start<? THEN excluded.window_start ELSE window_start END,
- blocked_until=CASE WHEN window_start<? THEN 0 WHEN blocked_until>? THEN blocked_until WHEN failures>=4 THEN ?+min(300000,1000*(1 << min(8,failures-4))) ELSE 0 END
- RETURNING blocked_until,admission`).bind(key, now, admission, now - 900000, now, now - 900000, now, now - 900000, now - 900000, now, now)));
+ blocked_until=CASE WHEN window_start<? THEN 0 WHEN blocked_until>? THEN blocked_until WHEN failures>=? THEN ?+min(?,1000*(1 << min(?,failures-?))) ELSE 0 END
+ RETURNING blocked_until,admission`).bind(key, now, admission, now - 900000, now, now - 900000, now, now - 900000, now - 900000, now, free, now, cap, maxShift, free)));
     return Math.max(0, ...rows.map(r => { const row = r.results[0] as {
         blocked_until: number;
         admission: string;
@@ -65,7 +69,7 @@ export async function resetLogin(env: Env, req: Request): Promise<void> {
     if (!env.DB)
         return;
     const keys = await throttleKeys(env, req);
-    await env.DB.batch(keys.map(key => env.DB!.prepare('DELETE FROM login_limits WHERE key=?').bind(key)));
+    await env.DB.batch(keys.map(({ key }) => env.DB!.prepare('DELETE FROM login_limits WHERE key=?').bind(key)));
 }
 export async function helperQuota(env: Env, scope: string, kind: string, max = 60, window = 60000): Promise<boolean> {
     if (!env.DB)

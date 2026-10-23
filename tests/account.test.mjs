@@ -6,7 +6,7 @@ import worker from '../src/index.ts';
 import {readOwner} from '../src/security/auth.ts';
 import {encodeGuid} from '../src/jellyfin/ids.ts';
 const origin='https://rill.example';
-function env(){return {DB:new D1(),RILL_DATA_KEY:Buffer.alloc(32,9).toString('base64'),RILL_SETUP_TOKEN:'test-provision',RILL_SECRET:'test-signing-key'};}
+function env(){return {DB:new D1(),RILL_DATA_KEY:Buffer.alloc(32,9).toString('base64'),RILL_SETUP_TOKEN:'0123456789abcdef0123456789abcdef',RILL_SECRET:'test-signing-key'};}
 function req(path,body={},cookie='',extra={}) {return new Request(origin+path,{method:'POST',headers:{origin,'content-type':'application/json','cf-connecting-ip':'203.0.113.50',...(cookie?{cookie}:{}),...extra},body:JSON.stringify(body)});}
 const cookies=res=>res.headers.getSetCookie().map(c=>c.split(';')[0]);
 async function setup(e,config={}){const res=await worker.fetch(req('/api/account/save',{setupToken:e.RILL_SETUP_TOKEN,config:{...config,jellyfin:{...config.jellyfin,username:'owner',password:'correct-password'}}}),e);assert.equal(res.status,200);return {res,cookie:cookies(res).find(c=>c.startsWith('__Host-rill_owner=')),data:await res.json()};}
@@ -40,7 +40,7 @@ test('device cookie escapes the account lockout',async()=>{
  const e=env();await setup(e);
  const login=await worker.fetch(req('/api/account/login',{username:'owner',password:'correct-password'}),e);assert.equal(login.status,200);
  const device=cookies(login).find(c=>c.startsWith('__Host-rill_device='));assert.ok(device);
- for(let i=0;i<8;i++)await worker.fetch(req('/api/account/login',{username:'owner',password:'wrong'},'',{'cf-connecting-ip':`198.51.100.${i+1}`}),e);
+ for(let i=0;i<22;i++)await worker.fetch(req('/api/account/login',{username:'owner',password:'wrong'},'',{'cf-connecting-ip':`198.51.100.${i+1}`}),e);
  assert.equal((await worker.fetch(req('/api/account/login',{username:'owner',password:'correct-password'},'',{'cf-connecting-ip':'198.51.100.99'}),e)).status,429);
  assert.equal((await worker.fetch(req('/api/account/login',{username:'owner',password:'correct-password'},device,{'cf-connecting-ip':'198.51.100.99'}),e)).status,200);
  // A forged or tampered device cookie falls back to the shared account bucket.
@@ -86,7 +86,7 @@ test('password change invalidates device cookies',async()=>{
  const changed=await worker.fetch(req('/api/account/save',{currentPassword:'correct-password',config:{...data.config,jellyfin:{...data.config.jellyfin,password:'rotated-password'}}},cookie),e);assert.equal(changed.status,200);
  assert.ok(cookies(changed).some(c=>c.startsWith('__Host-rill_device=')));
  // Fill the shared account bucket from other IPs.
- for(let i=0;i<8;i++)await worker.fetch(req('/api/account/login',{username:'owner',password:'wrong'},'',{'cf-connecting-ip':`198.51.100.${i+1}`}),e);
+ for(let i=0;i<22;i++)await worker.fetch(req('/api/account/login',{username:'owner',password:'wrong'},'',{'cf-connecting-ip':`198.51.100.${i+1}`}),e);
  // old device cookie
  assert.equal((await worker.fetch(req('/api/account/login',{username:'owner',password:'rotated-password'},stolen,{'cf-connecting-ip':'198.51.100.200'}),e)).status,429);
  assert.equal((await worker.fetch(req('/api/account/login',{username:'owner',password:'rotated-password'},cookies(changed).find(c=>c.startsWith('__Host-rill_device=')),{'cf-connecting-ip':'198.51.100.200'}),e)).status,200);
@@ -117,4 +117,48 @@ test('Trakt and Simkl verification links must be https',async()=>{
   const res=await worker.fetch(req('/api/oauth/simkl/pin',{clientId:'id'},cookie),e);assert.equal(res.status,200);assert.equal((await res.json()).verificationUrl,'https://simkl.com/pin');
  });
  e.DB.close();
+});
+test('account lockout stays short and a signed-in browser can approve Quick Connect',async()=>{
+ const e=env();const {cookie}=await setup(e);
+ for(let i=0;i<30;i++)await worker.fetch(req('/Users/AuthenticateByName',{Username:'owner',Pw:'wrong'},'',{'cf-connecting-ip':`198.51.100.${i+1}`}),e);
+ const blocked=await worker.fetch(req('/Users/AuthenticateByName',{Username:'owner',Pw:'correct-password'},'',{'cf-connecting-ip':'198.51.100.250'}),e);
+ assert.equal(blocked.status,429);assert.ok(Number(blocked.headers.get('retry-after'))<=30);
+ const qc=await (await worker.fetch(req('/QuickConnect/Initiate',{},'',{'x-emby-authorization':'MediaBrowser Client="t", Device="t", DeviceId="t", Version="1"'}),e)).json();
+ assert.equal((await worker.fetch(req('/api/account/quickconnect',{code:'000000'},cookie),e)).status,404);
+ assert.equal((await worker.fetch(req('/api/account/quickconnect',{code:qc.Code}),e)).status,401);
+ assert.equal((await worker.fetch(req('/api/account/quickconnect',{code:qc.Code},cookie),e)).status,200);
+ const signed=await worker.fetch(req('/Users/AuthenticateWithQuickConnect',{Secret:qc.Secret}),e);assert.equal(signed.status,200);assert.ok((await signed.json()).AccessToken);
+ e.DB.close();
+});
+test('setup token guesses are throttled and short tokens are refused',async()=>{
+ const e=env();const guess=t=>worker.fetch(req('/api/account/save',{setupToken:t,config:{jellyfin:{username:'owner',password:'correct-password'}}}),e);
+ const statuses=[];for(let i=0;i<7;i++)statuses.push((await guess('f'.repeat(32))).status);
+ assert.deepEqual(statuses.slice(0,5),[403,403,403,403,403]);assert.ok(statuses.includes(429));
+ const short={...env(),RILL_SETUP_TOKEN:'short'};
+ assert.equal((await worker.fetch(req('/api/account/save',{setupToken:'short',config:{jellyfin:{username:'owner',password:'correct-password'}}}),short)).status,503);
+ e.DB.close();short.DB.close();
+});
+test('Quick Connect issuance is limited per IP',async()=>{
+ const e=env();await setup(e);const start=ip=>worker.fetch(req('/QuickConnect/Initiate',{},'',{'cf-connecting-ip':ip}),e);
+ for(let i=0;i<5;i++)assert.equal((await start('198.51.100.1')).status,200);
+ assert.equal((await start('198.51.100.1')).status,429);assert.equal((await start('198.51.100.2')).status,200);
+ e.DB.close();
+});
+test('capability URLs are rate limited',async()=>{
+ const e=env();const {data}=await setup(e);
+ assert.equal((await worker.fetch(new Request(`${origin}/${data.token}/manifest.json`),e)).status,200);
+ await e.DB.prepare("UPDATE helper_limits SET count=300 WHERE key LIKE '%:capability'").run();
+ assert.equal((await worker.fetch(new Request(`${origin}/${data.token}/manifest.json`),e)).status,429);
+ e.DB.close();
+});
+test('image ETags are keyed, not a digest of the source URL',async()=>{
+ const {imageResponse}=await import('../src/jellyfin/images.ts');
+ const e=env();const url='https://api.ratingposterdb.com/private-key/imdb/poster-default/tt1.jpg';
+ const originalCaches=globalThis.caches;globalThis.caches={default:{match:async()=>undefined,put:async()=>{}}};
+ try{
+  await mockFetch(()=>new Response(Uint8Array.from([137,80,78,71,13,10,26,10,0]),{headers:{'content-type':'image/png'}}),async()=>{
+   const res=await imageResponse({ctx:{origin,scope:'owner',env:e},q:()=>undefined},new Request(origin+'/x'),url,'primary');
+   assert.equal(res.status,200);assert.notEqual(res.headers.get('etag'),`"${createHash('md5').update(url).digest('hex')}"`);
+  });
+ }finally{globalThis.caches=originalCaches;e.DB.close();}
 });

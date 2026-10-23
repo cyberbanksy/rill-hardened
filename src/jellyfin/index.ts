@@ -225,7 +225,8 @@ inner.all('/system/ping', (c) => c.json(c.get('jf').ctx.cfg.name || 'Rill'));
 inner.get('/quickconnect/enabled', (c) => c.json(true));
 inner.post('/quickconnect/initiate', async (c) => {
   const jf = c.get('jf');
-  if(!await helperQuota(jf.ctx.env,jf.ctx.scope,'quickconnect',10))return reply(c,{Message:'Try again later'},429);
+  const ip=await sha256(c.req.header('cf-connecting-ip') ?? 'unknown');
+  if(!await helperQuota(jf.ctx.env,jf.ctx.scope,`quickconnect:${ip}`,5)||!await helperQuota(jf.ctx.env,jf.ctx.scope,'quickconnect',60))return reply(c,{Message:'Try again later'},429);
   return reply(c, quickConnectDto(await startQuickConnect(jf.ctx, jf.client)));
 });
 inner.get('/quickconnect/connect', async (c) => {

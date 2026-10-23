@@ -810,6 +810,8 @@ function body(): string {
     <div class="f"><label class="t" for="jf-max">Max sources per title</label><input type="number" id="jf-max" data-k="jellyfin.maxSources" min="1" max="200"></div>
   </div>
   <div class="row"><div class="f" style="flex:0"><button type="button" id="jf-credentials">Update sign-in</button></div><div class="f"><p class="status" id="jf-cred-status" role="alert"></p></div></div>
+  <div class="row"><div class="f"><label class="t" for="qc-code">Quick Connect code</label><input type="text" id="qc-code" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="Shown by the Jellyfin app"></div><div class="f" style="flex:0"><button type="button" id="qc-approve">Approve</button></div></div>
+  <p class="status" id="qc-status" role="alert"></p>
   <details class="profile-settings"><summary>Profiles</summary><p class="note">Profiles use the same password. Share your watch history or keep it separate.</p><div id="profiles"></div><button type="button" id="profile-add">Add profile</button></details>
   <label class="t">Home screen rows</label>
   <div class="list" data-order="jellyfin.home" data-options="resume,nextup,latest,upcoming"></div>
@@ -1114,6 +1116,15 @@ const JS = String.raw`
       if (r.token) token = r.token;
       renderInstall(); renderAccount();
       status.textContent = 'Sign-in updated. Other devices need to sign in again.';
+    });
+  });
+  $('qc-approve').addEventListener('click', function () {
+    var status = $('qc-status'), code = $('qc-code').value.replace(/[^0-9]/g, '');
+    if (code.length !== 6) { status.textContent = 'Enter the 6-digit code from the app.'; return; }
+    status.textContent = 'Approving…';
+    api('/api/account/quickconnect', { code: code }).then(function (r) {
+      status.textContent = r.error || 'Approved. The app signs in on its own.';
+      if (!r.error) $('qc-code').value = '';
     });
   });
   function logout() {

@@ -16,8 +16,11 @@
    - `/Users/Public` returns `[]`.
    - Changing the username or password, and `/api/account/logout-all`, need `currentPassword`. Failures count against the login throttle.
    - New passwords need 12+ characters; existing shorter ones keep working.
-   - A browser sign-in sets a `__Host-rill_device` [device cookie](https://owasp.org/www-community/Slow_Down_Online_Guessing_Attacks_with_Device_Cookies) (180 days, bound to `auth_generation`). Logins with a valid one are throttled per device; others share the per-IP and account buckets. Jellyfin apps don't send cookies, so a new app sign-in can be delayed during a guessing attack.
+   - A browser sign-in sets a `__Host-rill_device` [device cookie](https://owasp.org/www-community/Slow_Down_Online_Guessing_Attacks_with_Device_Cookies) (180 days, bound to `auth_generation`). Logins with a valid one are throttled per device; others share the per-IP bucket (5 free, then 1–256 s) and an account bucket (20 free, then at most 30 s), so nobody can hold every login shut. A signed-in browser can also approve a Jellyfin app's Quick Connect code from settings (`/api/account/quickconnect`).
    - Known limitation: a stolen session without a device cookie can keep the account bucket throttled through failed `currentPassword` checks. Changing the password from a browser that has a device cookie ends that session.
+   - First-run setup: `RILL_SETUP_TOKEN` must be at least 32 characters, guesses share the login throttle, and the comparison is over SHA-256 digests.
+   - Quotas: Quick Connect starts 5/min per IP and 60/min overall; capability (`r1.`) URLs 300 requests/min; uncached AI searches 30/hour.
+   - Image ETags and Cache API keys use the keyed tag, since source URLs can carry provider keys.
    - The owner cookie is `__Host-rill_owner` on HTTPS; sign in again once after upgrading.
    - Settings page: CSP (`default-src 'none'`, its one inline script allowed by hash, `frame-ancestors 'none'`), `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin`. All responses: `nosniff`, `Referrer-Policy: no-referrer`, HSTS on HTTPS.
    - Artwork URLs in settings and Trakt/Simkl verification links must be `https:`.

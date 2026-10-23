@@ -2,28 +2,14 @@
 
 ## Reporting a vulnerability
 
-Please don't open a public issue. Report privately through GitHub instead: open the **Security** tab of this repository and select **Report a vulnerability**. If that button isn't there, open an issue that asks for a private contact and leaves out the details.
+Please don't open a public issue. Use **Report a vulnerability** on this repository's Security tab. If that button isn't there, open an issue asking for a private contact, without details.
 
-Include:
-
-- the affected route, file or setting,
-- steps to reproduce, ideally against your own deployment or the local test setup,
-- what an attacker gains.
-
-You should get a reply within a week. Fixes land on `main` with a note in [HARDENING.md](HARDENING.md). Your copy never updates itself, so watch this repository's releases or security advisories and merge fixes yourself.
+Include the affected route or file, steps to reproduce, and impact. Expect a reply within a week. Deployments don't update themselves; watch this repository (Custom → Security alerts) to hear about fixes.
 
 ## Scope
 
-In scope: this repository's Worker code, the settings page, the build and deploy scripts, and the defaults they ship with.
+In scope: this repository's Worker code, the settings page, the build and deploy scripts, and their defaults.
 
-Out of scope:
+Out of scope: third-party add-ons and providers and the playback URLs they return, Cloudflare platform behaviour (including the DNS-pinning gap in [HARDENING.md](HARDENING.md)), and denial of service by ordinary traffic volume.
 
-- third-party add-ons and providers, and the playback URLs they return,
-- Cloudflare platform behaviour, including the documented DNS-pinning gap in [HARDENING.md](HARDENING.md),
-- denial of service that only uses up your own free-plan quotas through ordinary traffic volume.
-
-Upstream Rill issues that also affect upstream belong with [mrtxiv/Rill](https://github.com/mrtxiv/Rill) too.
-
-## Testing your own deployment
-
-You may test a deployment you own. Don't test other people's installs. Load tests count against your own Cloudflare quotas.
+If the issue also affects upstream, please tell [mrtxiv/Rill](https://github.com/mrtxiv/Rill) as well.

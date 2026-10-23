@@ -20,12 +20,11 @@ export async function claimOwner(env: Env, installation: string, username: strin
     return result.meta.changes === 1;
 }
 export function readCookie(req: Request, name: string): string { return req.headers.get('cookie')?.split(';').map(p => p.trim()).find(p => p.startsWith(name + '='))?.slice(name.length + 1) ?? ''; }
-// Device cookies (OWASP lockout guidance): a browser that has signed in before gets its own throttle bucket,
-// so failed guesses from elsewhere cannot lock the owner out of the settings page.
+// A browser that signed in before gets its own throttle bucket, so others' failed guesses can't lock it out.
 const DEVICE_DAYS = 180;
 const deviceCookie = (url: string) => url.startsWith('https:') ? '__Host-rill_device' : 'rill_device';
 async function deviceSecret(env: Env): Promise<string | null> { return env.RILL_DATA_KEY ? hmac(env.RILL_DATA_KEY, 'rill:device-cookie:v1') : null; }
-// The signed payload carries auth_generation, so a password change or log-out-everywhere retires every device cookie.
+// Signed with auth_generation, so a password change or logout-all invalidates it.
 export async function trustedDevice(env: Env, req: Request): Promise<string | null> {
     const secret = await deviceSecret(env), [id, exp, g, sig] = readCookie(req, deviceCookie(req.url)).split('.');
     if (!secret || !id || !exp || !g || !sig || !/^[A-Za-z0-9_-]{22}$/.test(id) || !(Number(exp) > Date.now()))

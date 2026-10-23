@@ -297,7 +297,7 @@ inner.post('/tracking/retry', async c => {
   return c.json({queued:result.meta.changes});
 });
 
-// Like Jellyfin's "hide from login screen": listing names would hand out half of every login.
+// Don't reveal profile names before login.
 inner.get('/users/public', (c) => reply(c,[]));
 inner.get('/users/me', (c) => {
   const jf = c.get('jf');
@@ -1055,8 +1055,7 @@ async function imageHandler(c: C): Promise<Response> {
   const index = c.req.param('index') ?? jf.q('imageIndex') ?? '0';
   if (!decodeGuid(id) || !['primary','backdrop','logo','thumb','banner','art'].includes(type) || index !== '0') return c.body(null, 404);
   // Tags are opaque cache keys, never caller-supplied fetch destinations.
-  // Item IDs are forgeable, so only signed-in requests may resolve artwork through add-ons and provider keys;
-  // anonymous image requests are limited to tags already issued in authenticated responses.
+  // Item IDs are forgeable; anonymous requests only get already-issued tags.
   const url = await imageUrlByTag(jf.ctx, jf.q('tag')) ?? (jf.claims ? await imageUrlFor(lib(c), id, type) : null);
   return url ? imageResponse(jf, c.req.raw, url, type) : c.body(null, 404);
 }
@@ -1067,7 +1066,6 @@ inner.on('HEAD', '/items/:id/images/:type/:index', imageHandler);
 async function profileImage(c: C): Promise<Response> {
   const jf = c.get('jf');
   if (c.req.param('type')?.toLowerCase() !== 'primary' || (c.req.param('index') ?? jf.q('imageIndex') ?? '0') !== '0') return c.body(null, 404);
-  // As with item images, anonymous requests need a tag that was issued to a signed-in client.
   const profile = jf.claims ? (await profileUsers(jf.ctx)).find(p => p.who.userId === plainGuid(c.req.param('uid'))) : undefined;
   const url = await imageUrlByTag(jf.ctx, jf.q('tag')) ?? profile?.ctx.profile?.avatar;
   return url ? imageResponse(jf, c.req.raw, url, 'primary') : c.body(null,404);

@@ -1095,7 +1095,7 @@ const JS = String.raw`
       return r;
     });
   }
-  // Username and password changes are explicit and need the current password; autosave never sends them.
+  // Not autosaved; needs the current password.
   var jfUserEdited = false;
   $('jf-user').addEventListener('input', function () { jfUserEdited = true; });
   $('jf-credentials').addEventListener('click', function () {
@@ -2189,7 +2189,6 @@ function pageScript(): string {
 }
 
 let policy: string | undefined;
-/** Only the page's own inline script may run; the page cannot be framed, post forms or call other origins. */
 export function pagePolicy(): string {
   policy ??= [
     "default-src 'none'",

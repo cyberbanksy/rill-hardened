@@ -10,8 +10,7 @@ import { readOwner, verifyPassword, passwordHash, claimOwner, loginThrottle, res
 import { loadConfig, mergePrivate, publicConfig, storeConfig } from '../security/secrets';
 import { limitedJson } from '../security/limits';
 const SESSION_DAYS = 30, MIN_PASSWORD = 12;
-// __Host- cookies must be Secure, host-only and Path=/, so a sibling subdomain cannot plant or overwrite them.
-// Plain-HTTP local development cannot set Secure cookies and keeps the unprefixed name.
+// HTTP (local dev) can't set Secure cookies, so no __Host- prefix there.
 const cookieName = (url: string) => url.startsWith('https:') ? '__Host-rill_owner' : 'rill_owner';
 type BuildCtx = (cfg: RillConfig, env: Env, origin: string) => Promise<Ctx>;
 function cookieValue(req: Request): string { return readCookie(req, cookieName(req.url)); }
@@ -45,7 +44,6 @@ export async function ownerSession(env: Env, req: Request): Promise<OwnerRow | n
     }
 }
 function setCookie(origin: string, value: string, maxAge: number): string { return `${cookieName(origin)}=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Strict${origin.startsWith('https:') ? '; Secure' : ''}`; }
-// Re-authentication for credential changes shares the login throttle, so a stolen session cannot guess the password here.
 async function confirmPassword(env: Env, req: Request, owner: OwnerRow, password: unknown): Promise<Response | null> {
     const retry = await loginThrottle(env, req);
     if (retry)
@@ -130,7 +128,7 @@ export function mountAccountRoutes(router: Hono<{
         const ctx = await buildCtx(cfg, c.env, new URL(c.req.url).origin);
         await registerAccount(ctx, true);
         c.header('Set-Cookie', setCookie(ctx.origin, await mintSession(c.env, c.req.raw, (await readOwner(c.env))!), SESSION_DAYS * 86400));
-        // Setup and credential changes bump or start a generation; give this browser a device cookie for it.
+        // New auth generation: reissue this browser's device cookie.
         const device = !owner || password || username !== owner.username ? await deviceSetCookie(c.env, c.req.raw) : null;
         if (device)
             c.header('Set-Cookie', device, { append: true });

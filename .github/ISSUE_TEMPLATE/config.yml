@@ -2,7 +2,7 @@ blank_issues_enabled: false
 contact_links:
   - name: Report a security vulnerability
     url: https://github.com/cyberbanksy/rill-hardened/security/advisories/new
-    about: Please report vulnerabilities privately, not as an issue.
+    about: Report vulnerabilities privately.
   - name: Upstream Rill
     url: https://github.com/mrtxiv/Rill
-    about: Features and bugs that aren't about this fork's hardening.
+    about: Anything not specific to this fork.

@@ -1,4 +1,3 @@
-# Dependabot only opens pull requests for review; nothing merges or deploys on its own.
 version: 2
 updates:
   - package-ecosystem: npm

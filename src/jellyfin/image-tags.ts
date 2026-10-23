@@ -5,11 +5,7 @@ import type { Ctx } from '../context';
 const remembered = new WeakMap<D1Database, Map<string, number>>();
 const tagsByKey = new Map<string, Map<string, string>>();
 
-/**
- * With the data key, tags are keyed HMACs: nobody can compute the tag of a known artwork URL, so an image
- * request without a session works only with a tag the server already handed to a signed-in client.
- * Without it (internal cache keys and ETags only) the tag is a plain digest.
- */
+// Keyed tags can't be computed from a public URL; unkeyed ones are only used as cache keys and ETags.
 export function artworkTag(url: string, dataKey = ''): string {
   let tags = tagsByKey.get(dataKey);
   if (!tags) {

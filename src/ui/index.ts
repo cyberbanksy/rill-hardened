@@ -64,7 +64,6 @@ async function upstream(url: string, init: RequestInit = {}): Promise<{ status: 
   }
 }
 
-// Provider-supplied links are shown to the owner as clickable links; only https: may reach an href.
 function httpsLink(v: unknown, fallback: string): string {
   try { return typeof v === 'string' && new URL(v).protocol === 'https:' ? v : fallback; } catch { return fallback; }
 }

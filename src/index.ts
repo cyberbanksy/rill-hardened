@@ -26,12 +26,11 @@ app.use('*', async (c, next) => {
     c.res.headers.set('Access-Control-Allow-Headers','Content-Type,Authorization,X-Emby-Authorization,X-Emby-Token,X-MediaBrowser-Token');
     c.res.headers.set('Access-Control-Allow-Methods','GET,POST,PUT,DELETE,OPTIONS');
   }
-  // Baseline for every response; routes that need more (settings page CSP, media sandbox) set their own.
   try {
     if(!c.res.headers.has('X-Content-Type-Options'))c.res.headers.set('X-Content-Type-Options','nosniff');
     if(!c.res.headers.has('Referrer-Policy'))c.res.headers.set('Referrer-Policy','no-referrer');
     if(c.req.url.startsWith('https:'))c.res.headers.set('Strict-Transport-Security','max-age=31536000');
-  } catch {}
+  } catch {} // passthrough responses have immutable headers
 
 });
 app.options('*', (c) => c.body(null, 204));

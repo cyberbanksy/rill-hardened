@@ -5,45 +5,29 @@
 
 <p align="center">
   <strong>Your Stremio add-ons as a private Jellyfin server, on your own free Cloudflare account.</strong><br>
-  A security-hardened fork of <a href="https://github.com/mrtxiv/Rill">mrtxiv/Rill</a>.
+  A fork of <a href="https://github.com/mrtxiv/Rill">mrtxiv/Rill</a> with stricter defaults.
 </p>
 
 <p align="center">
   <a href="https://github.com/cyberbanksy/rill-hardened/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/cyberbanksy/rill-hardened/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
-  <a href="HARDENING.md"><img alt="Hardening notes" src="https://img.shields.io/badge/security-hardened-2ea44f.svg"></a>
-  <img alt="Runs on Cloudflare Workers" src="https://img.shields.io/badge/runs%20on-Cloudflare%20Workers-f38020.svg">
-</p>
-
-<p align="center">
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#what-the-hardening-changes">What's hardened</a> ·
-  <a href="#updating">Updating</a> ·
-  <a href="HARDENING.md">Full security notes</a> ·
-  <a href="SECURITY.md">Report a vulnerability</a>
 </p>
 
 ---
 
 Rill turns the Stremio add-ons you choose into a Jellyfin server, so any Jellyfin app (Infuse, Swiftfin, Jellyfin and others) can sign in to it. It runs as a single Cloudflare Worker with a D1 database. There's no server to maintain, and the free plans are enough.
 
-This copy is Rill at upstream commit `5b9dd54` plus the security changes in [HARDENING.md](HARDENING.md). Rill ships with no add-ons or content. You add the ones you're allowed to use.
+Based on upstream `5b9dd54`. Rill ships with no add-ons or content.
 
-## What the hardening changes
+## Differences from upstream
 
-| Area | Upstream Rill | This fork |
-| --- | --- | --- |
-| Settings and helper routes | Several helpers callable without signing in | Every `/api/*` helper needs the owner session, an exact same-origin request and JSON |
-| First sign-in | Whoever reaches a new install first claims it | Needs a one-time `RILL_SETUP_TOKEN`; the claim is atomic |
-| Saved add-on and provider keys | Stored and returned in readable form | AES-GCM encrypted with `RILL_DATA_KEY`; settings never send them back to the browser |
-| Login | Unlimited attempts | Progressive throttling, revocable sessions and tokens, current password needed to change sign-in |
-| Without a login | Artwork resolved for any item ID, user list visible | Only server-issued, unguessable image tags; no user list |
-| Artwork | Any content type, including SVG | PNG, JPEG, GIF or WebP checked by signature, served sandboxed |
-| Outbound requests | Followed redirects, any address | HTTPS only, private addresses denied, redirects checked hop by hop, byte limits |
-| Settings page | No browser protections | Hash-pinned Content-Security-Policy, no framing, `__Host-` cookies |
-| Updates | Pulled and deployed upstream code automatically | Never updates itself; you review and merge changes |
+- Settings and `/api/*` routes require the owner's session.
+- First sign-in needs `RILL_SETUP_TOKEN`.
+- Saved add-on and provider keys are encrypted with `RILL_DATA_KEY` and never sent back to the browser.
+- Logins are throttled; artwork must be PNG, JPEG, GIF or WebP; outbound requests are HTTPS-only and can't reach private addresses.
+- No auto-update. You merge upstream changes yourself.
 
-One gap remains and is documented: Cloudflare Workers can't pin a checked DNS answer, so the outbound address checks don't fully close DNS rebinding. See [HARDENING.md](HARDENING.md#changes-in-requested-order).
+Details and known gaps are in [HARDENING.md](HARDENING.md).
 
 ## Quick start
 
@@ -94,9 +78,23 @@ The build runs the type check and tests before it deploys. Tables are created on
 
 Add a server in your Jellyfin app with your `workers.dev` address, then sign in with the username and password from step 3.
 
+<details>
+<summary>Deploying with Wrangler instead</summary>
+
+```sh
+npm ci --ignore-scripts
+npx wrangler secret put RILL_DATA_KEY
+npx wrangler secret put RILL_SETUP_TOKEN
+npm run build
+npm run deploy
+```
+
+</details>
+
 ## Updating
 
-Your copy never updates itself. To take a newer version, review the change, merge it into your GitHub copy, and Cloudflare rebuilds and deploys it. Before merging anything from upstream, go through the checklist at the end of [HARDENING.md](HARDENING.md#every-upstream-merge-must-re-check).
+Your copy never updates itself. To take a newer version, review the change, merge it into your GitHub copy, and Cloudflare rebuilds and deploys it. Before merging anything from upstream, go through the checklist at the end of [HARDENING.md](HARDENING.md#upstream-merge-checklist).
+
 
 ## Development
 
@@ -104,18 +102,14 @@ Your copy never updates itself. To take a newer version, review the change, merg
 npm ci --ignore-scripts
 npm run typecheck
 npm test
-npm run build
-npx wrangler secret put RILL_DATA_KEY
-npx wrangler secret put RILL_SETUP_TOKEN
-npm run deploy
 ```
 
-Tests need Node 22.13 or newer. They run against in-memory SQLite and mocked HTTP; nothing touches the network. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Requires Node 22.13+.
 
 ## Security
 
-Please don't open a public issue for a vulnerability. See [SECURITY.md](SECURITY.md) for how to report one privately.
+See [SECURITY.md](SECURITY.md).
 
 ## Credits and license
 
-Rill is by [mrtxiv](https://github.com/mrtxiv/Rill). This fork adds the security changes only. MIT, as upstream; see [LICENSE](LICENSE).
+Rill is by [mrtxiv](https://github.com/mrtxiv/Rill). MIT, see [LICENSE](LICENSE).

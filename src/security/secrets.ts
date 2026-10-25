@@ -3,6 +3,7 @@ import { b64urlDecode, b64urlEncode } from '../util/bytes';
 import { decodeConfig, encodeConfig } from '../config/codec';
 import { normalizeConfig, type RillConfig } from '../config/schema';
 const PREFIX = 'e1.';
+const FOREVER_MS = 100 * 365 * 86400000;
 async function dataKey(env: Env): Promise<CryptoKey> {
     if (!env.RILL_DATA_KEY)
         throw Error('RILL_DATA_KEY is required');
@@ -96,7 +97,7 @@ async function keyedImageTags(env: Env): Promise<void> {
     if (await db.prepare("SELECT 1 FROM state WHERE key='hardening:image-tags-v2'").first())
         return;
     await db.batch([db.prepare('DELETE FROM image_tags'), db.prepare('DELETE FROM presentations'), db.prepare("DELETE FROM state WHERE key LIKE 'jf-image:v1:%'")]);
-    await db.prepare("INSERT OR IGNORE INTO state(key,value,expires) VALUES('hardening:image-tags-v2','true',?)").bind(Date.now() + 100 * 365 * 86400000).run();
+    await db.prepare("INSERT OR IGNORE INTO state(key,value,expires) VALUES('hardening:image-tags-v2','true',?)").bind(Date.now() + FOREVER_MS).run();
 }
 async function encryptV1(env: Env): Promise<void> {
     const db = env.DB!;
@@ -142,5 +143,5 @@ async function encryptV1(env: Env): Promise<void> {
     // Legacy cache keys contain URLs; flush persisted caches, old hooks and monitor state.
     await db.batch([db.prepare('DELETE FROM image_tags'), db.prepare('DELETE FROM presentations')]);
     await db.prepare("DELETE FROM state WHERE key LIKE 'cache:%' OR key LIKE '%update%' OR key LIKE 'movielens:session:%' OR key LIKE 'jf-image:v1:%' OR key LIKE 'recommendations:%' OR key LIKE 'taste:%'").run();
-    await db.prepare("INSERT OR IGNORE INTO state(key,value,expires) VALUES('hardening:encrypted-v1','true',?)").bind(Date.now() + 100 * 365 * 86400000).run();
+    await db.prepare("INSERT OR IGNORE INTO state(key,value,expires) VALUES('hardening:encrypted-v1','true',?)").bind(Date.now() + FOREVER_MS).run();
 }

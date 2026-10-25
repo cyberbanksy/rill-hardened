@@ -18,7 +18,7 @@
     "@cloudflare/workers-types": "^5.0.0",
     "@types/node": "^22.20.4",
     "typescript": "^5.6.0",
-    "wrangler": "^4.131.1"
+    "wrangler": "^4.152.0"
   },
   "description": "Software you deploy and manage in your own Cloudflare account.",
   "license": "MIT",

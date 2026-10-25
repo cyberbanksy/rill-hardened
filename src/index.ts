@@ -5,7 +5,7 @@ import type { Env, RillJob } from './env';
 import { preparePresentation } from './jellyfin/presentation';
 import type { Ctx } from './context';
 import {loadConfig,migrateSecrets} from './security/secrets';
-import {generation} from './security/auth';
+import {generation,helperQuota} from './security/auth';
 import { sha256 } from './util/bytes';
 import { addonRouter } from './addon/index';
 import { handleJellyfinRequest, isJellyfinPath } from './jellyfin/index';
@@ -26,6 +26,11 @@ app.use('*', async (c, next) => {
     c.res.headers.set('Access-Control-Allow-Headers','Content-Type,Authorization,X-Emby-Authorization,X-Emby-Token,X-MediaBrowser-Token');
     c.res.headers.set('Access-Control-Allow-Methods','GET,POST,PUT,DELETE,OPTIONS');
   }
+  try {
+    if(!c.res.headers.has('X-Content-Type-Options'))c.res.headers.set('X-Content-Type-Options','nosniff');
+    if(!c.res.headers.has('Referrer-Policy'))c.res.headers.set('Referrer-Policy','no-referrer');
+    if(c.req.url.startsWith('https:'))c.res.headers.set('Strict-Transport-Security','max-age=31536000');
+  } catch {} // passthrough responses have immutable headers
 
 });
 app.options('*', (c) => c.body(null, 204));
@@ -62,6 +67,8 @@ app.use('*', async (c, next) => {
 app.use('/:cfg/*', async (c, next) => {
   const ctx = await buildCtx(c, c.req.param('cfg'));
   if (!ctx) return c.json({ error: 'bad config' }, 400);
+  // Capability URLs get synced and shared; cap the provider work one can drive.
+  if (!await helperQuota(c.env, ctx.scope, 'capability', 300)) return c.json({ error: 'Try again later.' }, 429);
   try {
     const exec = c.executionCtx;
     ctx.defer = work => exec.waitUntil(work.catch(() => console.warn('Background work failed')));

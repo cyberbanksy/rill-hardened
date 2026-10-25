@@ -9,7 +9,7 @@ import { decodeConfig, encodeConfig } from '../config/codec';
 import { getManifest } from '../stremio/client';
 import { sha256 } from '../util/bytes';
 import { listCatalogDefinitions, defaultCatalogEnabled, catalogSource } from '../addon/catalogs';
-import { renderPage, renderLogo } from './page';
+import { renderPage, renderLogo, pagePolicy } from './page';
 import { BRAND_ICON, BRAND_WORDMARK } from '../brand';
 import { queueRecommendations,recommendationJob } from '../storage/recommendation-jobs';
 import { syncMovieLens,movieLensSyncStatus,importRatingsCsv } from '../addon/movielens-sync';
@@ -64,6 +64,10 @@ async function upstream(url: string, init: RequestInit = {}): Promise<{ status: 
   }
 }
 
+function httpsLink(v: unknown, fallback: string): string {
+  try { return typeof v === 'string' && new URL(v).protocol === 'https:' ? v : fallback; } catch { return fallback; }
+}
+
 function num(v: unknown): number | undefined {
   const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
   return Number.isFinite(n) ? n : undefined;
@@ -116,7 +120,14 @@ async function buildCtx(cfg: RillConfig, env: Env | undefined, origin: string): 
 }
 
 uiRouter.get('/', (c) => {
-  return c.html(renderPage(), 200, { 'Cache-Control': 'no-store' });
+  return c.html(renderPage(), 200, {
+    'Cache-Control': 'no-store',
+    'Content-Security-Policy': pagePolicy(),
+    'X-Frame-Options': 'DENY',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+    'Cross-Origin-Opener-Policy': 'same-origin',
+  });
 });
 
 uiRouter.get('/logo.svg', (c) => {
@@ -295,7 +306,7 @@ uiRouter.post('/api/oauth/trakt/device', async (c) => {
   return c.json({
     deviceCode: r.data.device_code,
     userCode: r.data.user_code,
-    verificationUrl: r.data.verification_url,
+    verificationUrl: httpsLink(r.data.verification_url, 'https://trakt.tv/activate'),
     expiresIn: num(r.data.expires_in) ?? 600,
     interval: num(r.data.interval) ?? 5,
   });
@@ -369,7 +380,7 @@ uiRouter.post('/api/oauth/simkl/pin', async (c) => {
   }
   return c.json({
     userCode: String(r.data.user_code),
-    verificationUrl: typeof r.data.verification_url === 'string' ? r.data.verification_url : 'https://simkl.com/pin',
+    verificationUrl: httpsLink(r.data.verification_url, 'https://simkl.com/pin'),
     expiresIn: num(r.data.expires_in) ?? 900,
     interval: num(r.data.interval) ?? 5,
   });

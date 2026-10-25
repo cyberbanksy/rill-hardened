@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { BRAND_LOGO, BRAND_VERSION } from '../brand';
 import { DEFAULT_CONFIG } from '../config/schema';
 
@@ -573,7 +574,7 @@ function brand(welcome = false, heading = true): string {
 function body(): string {
   return `
 <main>
-<div id="setup-gate" hidden><form id="setup-form" autocomplete="on"><div class="f"><label for="setup-token">Provisioning token</label><input id="setup-token" type="password" autocomplete="off"></div>${brand(true)}<h2>Create your account</h2><p class="note">One account protects this page and signs you in from Jellyfin apps. Your settings are stored on your Worker and follow you to every device.</p><div class="f"><label class="t" for="setup-user">Username</label><input type="text" id="setup-user" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required></div><div class="f"><label class="t" for="setup-pass">Password</label><input type="password" id="setup-pass" name="password" autocomplete="new-password" minlength="8" required><p class="hint">At least 8 characters.</p></div><div class="f"><label class="t" for="setup-pass2">Confirm password</label><input type="password" id="setup-pass2" autocomplete="new-password" minlength="8" required></div><button type="submit" id="setup-submit">Create account</button><p class="status" id="setup-status" role="alert"></p></form></div>
+<div id="setup-gate" hidden><form id="setup-form" autocomplete="on"><div class="f"><label for="setup-token">Provisioning token</label><input id="setup-token" type="password" autocomplete="off"></div>${brand(true)}<h2>Create your account</h2><p class="note">One account protects this page and signs you in from Jellyfin apps. Your settings are stored on your Worker and follow you to every device.</p><div class="f"><label class="t" for="setup-user">Username</label><input type="text" id="setup-user" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required></div><div class="f"><label class="t" for="setup-pass">Password</label><input type="password" id="setup-pass" name="password" autocomplete="new-password" minlength="12" required><p class="hint">At least 12 characters.</p></div><div class="f"><label class="t" for="setup-pass2">Confirm password</label><input type="password" id="setup-pass2" autocomplete="new-password" minlength="12" required></div><button type="submit" id="setup-submit">Create account</button><p class="status" id="setup-status" role="alert"></p></form></div>
 <div id="login-gate" hidden><form id="login-form" autocomplete="on">${brand(true)}<p class="note">Sign in with your Jellyfin username and password to open your settings.</p><div class="f"><label class="t" for="login-user">Username</label><input type="text" id="login-user" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required></div><div class="f"><label class="t" for="login-pass">Password</label><input type="password" id="login-pass" name="password" autocomplete="current-password" required></div><button type="submit" id="login-submit">Sign in</button><p class="status" id="login-status" role="alert"></p></form></div>
 <header>
   <div class="brand-row">${brand()}<div class="header-actions"><span id="draft-status" role="status" hidden>Saved on this device</span><div id="account" class="account"></div><button type="button" id="menu-btn" aria-label="Open menu" aria-expanded="false" aria-controls="drawer"><span></span><span></span><span></span></button></div></div>
@@ -803,10 +804,14 @@ function body(): string {
 <section id="s-jellyfin">
   <h2><small>8</small>Jellyfin</h2>
   <div class="two">
-    <div class="f"><label class="t" for="jf-user">Username</label><input type="text" id="jf-user" data-k="jellyfin.username" autocomplete="off" spellcheck="false"></div>
-    <div class="f"><label class="t" for="jf-pass">Password</label><input type="password" id="jf-pass" placeholder="Leave blank to keep your password" data-k="jellyfin.password" autocomplete="off"></div>
+    <div class="f"><label class="t" for="jf-user">Username</label><input type="text" id="jf-user" autocomplete="username" autocapitalize="off" spellcheck="false"></div>
+    <div class="f"><label class="t" for="jf-pass">New password</label><input type="password" id="jf-pass" placeholder="Leave blank to keep your password" autocomplete="new-password" minlength="12"></div>
+    <div class="f"><label class="t" for="jf-current">Current password</label><input type="password" id="jf-current" placeholder="Needed to change your sign-in" autocomplete="current-password"></div>
     <div class="f"><label class="t" for="jf-max">Max sources per title</label><input type="number" id="jf-max" data-k="jellyfin.maxSources" min="1" max="200"></div>
   </div>
+  <div class="row"><div class="f" style="flex:0"><button type="button" id="jf-credentials">Update sign-in</button></div><div class="f"><p class="status" id="jf-cred-status" role="alert"></p></div></div>
+  <div class="row"><div class="f"><label class="t" for="qc-code">Quick Connect code</label><input type="text" id="qc-code" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="Shown by the Jellyfin app"></div><div class="f" style="flex:0"><button type="button" id="qc-approve">Approve</button></div></div>
+  <p class="status" id="qc-status" role="alert"></p>
   <details class="profile-settings"><summary>Profiles</summary><p class="note">Profiles use the same password. Share your watch history or keep it separate.</p><div id="profiles"></div><button type="button" id="profile-add">Add profile</button></details>
   <label class="t">Home screen rows</label>
   <div class="list" data-order="jellyfin.home" data-options="resume,nextup,latest,upcoming"></div>
@@ -1045,7 +1050,7 @@ const JS = String.raw`
     e.preventDefault();
     var status = $('setup-status'), user = $('setup-user').value.trim(), pass = $('setup-pass').value;
     if (!/^[a-z0-9._-]{1,32}$/i.test(user)) { status.textContent = 'Username: letters, numbers, dot, dash or underscore.'; return; }
-    if (pass.length < 8) { status.textContent = 'Use at least 8 characters.'; return; }
+    if (pass.length < 12) { status.textContent = 'Use at least 12 characters.'; return; }
     if (pass !== $('setup-pass2').value) { status.textContent = 'Passwords do not match.'; return; }
     status.textContent = 'Creating…';
     cfg.jellyfin.username = user; cfg.jellyfin.password = pass;
@@ -1092,6 +1097,36 @@ const JS = String.raw`
       return r;
     });
   }
+  // Not autosaved; needs the current password.
+  var jfUserEdited = false;
+  $('jf-user').addEventListener('input', function () { jfUserEdited = true; });
+  $('jf-credentials').addEventListener('click', function () {
+    var status = $('jf-cred-status'), user = $('jf-user').value.trim(), pass = $('jf-pass').value, current = $('jf-current').value;
+    if (!/^[a-z0-9._-]{1,32}$/i.test(user)) { status.textContent = 'Username: letters, numbers, dot, dash or underscore.'; return; }
+    if (pass && pass.length < 12) { status.textContent = 'Use at least 12 characters.'; return; }
+    if (!pass && user === cfg.jellyfin.username) { status.textContent = 'Nothing to change.'; return; }
+    if (!current) { status.textContent = 'Enter your current password.'; return; }
+    status.textContent = 'Updating…';
+    var next = clone(cfg); next.jellyfin.username = user; next.jellyfin.password = pass;
+    api('/api/account/save', { config: next, currentPassword: current }).then(function (r) {
+      if (r.error) { status.textContent = r.error; return; }
+      $('jf-pass').value = ''; $('jf-current').value = ''; jfUserEdited = false;
+      account.username = r.username || user;
+      if (r.config) { cfg = merge(DEFAULTS, r.config); fillInputs(); renderTrackerStates(); refreshNeeds(); }
+      if (r.token) token = r.token;
+      renderInstall(); renderAccount();
+      status.textContent = 'Sign-in updated. Other devices need to sign in again.';
+    });
+  });
+  $('qc-approve').addEventListener('click', function () {
+    var status = $('qc-status'), code = $('qc-code').value.replace(/[^0-9]/g, '');
+    if (code.length !== 6) { status.textContent = 'Enter the 6-digit code from the app.'; return; }
+    status.textContent = 'Approving…';
+    api('/api/account/quickconnect', { code: code }).then(function (r) {
+      status.textContent = r.error || 'Approved. The app signs in on its own.';
+      if (!r.error) $('qc-code').value = '';
+    });
+  });
   function logout() {
     clearTimeout(saveTimer);
     api('/api/account/logout').then(function () { account.signedIn = false; account.loaded = false; account.username = ''; cfg = clone(DEFAULTS); token = ''; lastCatKey = ''; renderAll(); renderAccount(); });
@@ -1300,7 +1335,7 @@ const JS = String.raw`
   function showExport(list){var box=$('collection-export-text');box.value=exportText(list);box.hidden=false;box.focus();box.select();try{navigator.clipboard.writeText(box.value);}catch(e){}}
   var collectionArtTarget=null;
   var ART_SHAPES=[['poster','Portrait','2:3'],['square','Square','1:1'],['landscape','Landscape','16:9']];
-  function artworkUrl(value) {try {var u=new URL(value);return ['http:','https:'].includes(u.protocol)?u.href:'';}catch(_){return '';}}
+  function artworkUrl(value) {try {var u=new URL(value);return u.protocol==='https:'?u.href:'';}catch(_){return '';}}
   function coverShape(col) {return col.coverShape || (col.cover?'poster':col.backdrop?'landscape':'poster');}
   function artworkImage(url,name,shape,extra) {
     var frame=el('div',{class:'art-image '+(extra || ''),'data-shape':shape || 'poster'});
@@ -1681,6 +1716,7 @@ const JS = String.raw`
     all('[data-arr]').forEach(function (n) { n.checked = (get(n.getAttribute('data-arr')) || []).indexOf(n.value) >= 0; });
     all('[data-lines]').forEach(function (n) { n.value = (get(n.getAttribute('data-lines')) || []).join('\n'); });
     all('[data-ui]').forEach(function (n) { n.value = get(n.getAttribute('data-ui'), ui) || ''; });
+    if (!jfUserEdited) $('jf-user').value = cfg.jellyfin.username || '';
     all('[data-order]').forEach(renderOrder);
     enhanceSelects();
     applyMode();
@@ -2159,9 +2195,27 @@ const JS = String.raw`
 })();
 `;
 
+function pageScript(): string {
+  return JS.replace('__DEFAULTS__', JSON.stringify(DEFAULT_CONFIG).replace(/</g, '\\u003c'));
+}
+
+let policy: string | undefined;
+export function pagePolicy(): string {
+  policy ??= [
+    "default-src 'none'",
+    `script-src 'sha256-${createHash('sha256').update(pageScript()).digest('base64')}'`,
+    "style-src 'unsafe-inline'",
+    "img-src 'self' https: data: blob:",
+    "connect-src 'self'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+  ].join('; ');
+  return policy;
+}
+
 export function renderPage(): string {
-  const defaults = JSON.stringify(DEFAULT_CONFIG).replace(/</g, '\\u003c');
-  const script = JS.replace('__DEFAULTS__', defaults);
+  const script = pageScript();
   return `<!doctype html>
 <html lang="en">
 <head>

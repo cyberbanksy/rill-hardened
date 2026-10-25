@@ -1,0 +1,25 @@
+name: Bug report
+description: Something doesn't work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Please don't include secrets, add-on URLs, tokens or your workers.dev address.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what you saw.
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: Jellyfin app and version
+      placeholder: Infuse 8.1, Swiftfin 1.3…
+  - type: input
+    id: commit
+    attributes:
+      label: Commit you deployed
+    validations:
+      required: true

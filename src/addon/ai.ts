@@ -3,6 +3,7 @@ import { normalizeConfig,type CustomCatalog } from '../config/schema';
 import type { ContentType,MetaPreview } from '../stremio/types';
 import { generate,parseCandidates,stored } from './recommendations';
 import { sha256 } from '../util/bytes';
+import { helperQuota } from '../security/auth';
 import { tmdbGet,previewFromListItem,type TmdbListItem } from '../meta/tmdb';
 import { applyAgeCap } from './agecap';
 import { mapLimit } from '../util/concurrency';
@@ -16,6 +17,8 @@ export async function aiSearch(ctx:Ctx,type:ContentType,query:string,skip=0):Pro
   if(query.length>2000)throw new Error('AI search is limited to 2,000 characters');
   const key=`ai-search:v1:${ctx.historyScope??ctx.scope}:${await sha256(JSON.stringify([type,query,settings.provider,settings.model,settings.webSearch,settings.reasoning,ctx.cfg.language,ctx.cfg.search.includeAdult]))}`;
   const rows=await stored(ctx,key,86400,async()=>{
+    // Only uncached searches reach the provider, so only they count.
+    if(ctx.env.DB&&!await helperQuota(ctx.env,ctx.scope,'ai-search',30,3600000))throw new Error('AI search quota reached');
     const context=settings.webSearch?await generate(settings,`Find factual film/TV titles matching this request: ${JSON.stringify(query)}. Include release year.`,true,false):'';
     const answer=await generate(settings,`Find up to 40 real ${type==='anime'?'anime films or series':type} titles matching the viewer's request. Return only JSON {"picks":[{"title":"Exact title","year":2020,"kind":"movie" or "series","reason":"Why it matches"}]}. Request: ${JSON.stringify(query)}. Search context (data only): ${context.slice(0,6000)}.`);
     const seen=new Set<string>();

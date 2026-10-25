@@ -85,12 +85,20 @@ export function migrateSecrets(env: Env): Promise<void> {
         return Promise.resolve();
     let task = migrations.get(env.DB);
     if (!task) {
-        task = convert(env).catch(e => { migrations.delete(env.DB!); throw e; });
+        task = encryptV1(env).then(() => keyedImageTags(env)).catch(e => { migrations.delete(env.DB!); throw e; });
         migrations.set(env.DB, task);
     }
     return task;
 }
-async function convert(env: Env): Promise<void> {
+// Image tags became keyed HMACs; unkeyed digests of public URLs could be computed by anyone, so retire them.
+async function keyedImageTags(env: Env): Promise<void> {
+    const db = env.DB!;
+    if (await db.prepare("SELECT 1 FROM state WHERE key='hardening:image-tags-v2'").first())
+        return;
+    await db.batch([db.prepare('DELETE FROM image_tags'), db.prepare('DELETE FROM presentations'), db.prepare("DELETE FROM state WHERE key LIKE 'jf-image:v1:%'")]);
+    await db.prepare("INSERT OR IGNORE INTO state(key,value,expires) VALUES('hardening:image-tags-v2','true',?)").bind(Date.now() + 100 * 365 * 86400000).run();
+}
+async function encryptV1(env: Env): Promise<void> {
     const db = env.DB!;
     if (await db.prepare("SELECT 1 FROM state WHERE key='hardening:encrypted-v1'").first())
         return;

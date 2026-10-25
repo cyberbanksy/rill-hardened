@@ -87,7 +87,7 @@ async function publicJson(ctx:Ctx,body:unknown,maxAge:number):Promise<Response> 
  const artwork=new Set(['poster','background','logo','thumbnail','cover','backdrop','avatar']);
  const transform=(value:unknown,key=''):unknown=>{
   if(typeof value==='string'&&/^https?:\/\//i.test(value)&&artwork.has(key)) {
-   const tag=artworkTag(value);mappings[tag]=value;return `${ctx.origin}/${ctx.cfgToken}/media/${tag}`;
+   const tag=artworkTag(value,ctx.env.RILL_DATA_KEY);mappings[tag]=value;return `${ctx.origin}/${ctx.cfgToken}/media/${tag}`;
   }
   if(Array.isArray(value))return value.map(v=>transform(v,key));
   if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,transform(v,k)]));

@@ -225,7 +225,8 @@ inner.all('/system/ping', (c) => c.json(c.get('jf').ctx.cfg.name || 'Rill'));
 inner.get('/quickconnect/enabled', (c) => c.json(true));
 inner.post('/quickconnect/initiate', async (c) => {
   const jf = c.get('jf');
-  if(!await helperQuota(jf.ctx.env,jf.ctx.scope,'quickconnect',10))return reply(c,{Message:'Try again later'},429);
+  const ip=await sha256(c.req.header('cf-connecting-ip') ?? 'unknown');
+  if(!await helperQuota(jf.ctx.env,jf.ctx.scope,`quickconnect:${ip}`,5)||!await helperQuota(jf.ctx.env,jf.ctx.scope,'quickconnect',60))return reply(c,{Message:'Try again later'},429);
   return reply(c, quickConnectDto(await startQuickConnect(jf.ctx, jf.client)));
 });
 inner.get('/quickconnect/connect', async (c) => {
@@ -259,7 +260,7 @@ inner.post('/users/authenticatebyname', async (c) => {
   const profile = jf.ctx.cfg.jellyfin.profiles?.find(p => p.name.toLowerCase() === String(username ?? '').trim().toLowerCase());
   const loginCtx = profile ? {...jf.ctx,cfg:{...jf.ctx.cfg,jellyfin:{...jf.ctx.cfg.jellyfin,username:profile.name}}} : jf.ctx;
   if (!await credentialsMatch(loginCtx, username, password)) return reply(c, { Message: 'Invalid username or password' }, 401);
-  await resetLogin(jf.ctx.env);
+  await resetLogin(jf.ctx.env,c.req.raw);
   jf.ctx = profileContext(jf.ctx,profile?.id)!;
   jf.who = await identityOf(jf.ctx);
   return signIn(c);
@@ -297,7 +298,8 @@ inner.post('/tracking/retry', async c => {
   return c.json({queued:result.meta.changes});
 });
 
-inner.get('/users/public', async (c) => reply(c,(await profileUsers(c.get('jf').ctx)).map(p => userDto(p.ctx,p.who))));
+// Don't reveal profile names before login.
+inner.get('/users/public', (c) => reply(c,[]));
 inner.get('/users/me', (c) => {
   const jf = c.get('jf');
   return reply(c, userDto(jf.ctx, jf.who));
@@ -1054,7 +1056,8 @@ async function imageHandler(c: C): Promise<Response> {
   const index = c.req.param('index') ?? jf.q('imageIndex') ?? '0';
   if (!decodeGuid(id) || !['primary','backdrop','logo','thumb','banner','art'].includes(type) || index !== '0') return c.body(null, 404);
   // Tags are opaque cache keys, never caller-supplied fetch destinations.
-  const url = await imageUrlByTag(jf.ctx, jf.q('tag')) ?? await imageUrlFor(lib(c), id, type);
+  // Item IDs are forgeable; anonymous requests only get already-issued tags.
+  const url = await imageUrlByTag(jf.ctx, jf.q('tag')) ?? (jf.claims ? await imageUrlFor(lib(c), id, type) : null);
   return url ? imageResponse(jf, c.req.raw, url, type) : c.body(null, 404);
 }
 inner.get('/items/:id/images/:type', imageHandler);
@@ -1064,8 +1067,8 @@ inner.on('HEAD', '/items/:id/images/:type/:index', imageHandler);
 async function profileImage(c: C): Promise<Response> {
   const jf = c.get('jf');
   if (c.req.param('type')?.toLowerCase() !== 'primary' || (c.req.param('index') ?? jf.q('imageIndex') ?? '0') !== '0') return c.body(null, 404);
-  const profile = (await profileUsers(jf.ctx)).find(p => p.who.userId === plainGuid(c.req.param('uid')));
-  const url = profile?.ctx.profile?.avatar;
+  const profile = jf.claims ? (await profileUsers(jf.ctx)).find(p => p.who.userId === plainGuid(c.req.param('uid'))) : undefined;
+  const url = await imageUrlByTag(jf.ctx, jf.q('tag')) ?? profile?.ctx.profile?.avatar;
   return url ? imageResponse(jf, c.req.raw, url, 'primary') : c.body(null,404);
 }
 inner.get('/users/:uid/images/:type',profileImage);

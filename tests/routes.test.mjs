@@ -12,7 +12,7 @@ import {mintToken,verifyToken,startQuickConnect,approveQuickConnect,claimQuickCo
 import {renderPage} from '../src/ui/page.ts';
 import {Script} from 'node:vm';
 const origin='https://rill.example';
-function env(){return {DB:new D1(),RILL_DATA_KEY:Buffer.alloc(32,9).toString('base64'),RILL_SETUP_TOKEN:'test-provision',RILL_SECRET:'test-signing-key'};}
+function env(){return {DB:new D1(),RILL_DATA_KEY:Buffer.alloc(32,9).toString('base64'),RILL_SETUP_TOKEN:'0123456789abcdef0123456789abcdef',RILL_SECRET:'test-signing-key'};}
 function req(path,body={},cookie='',extra={}) {return new Request(origin+path,{method:'POST',headers:{origin,'content-type':'application/json','cf-connecting-ip':'203.0.113.50',...(cookie?{cookie}:{}),...extra},body:JSON.stringify(body)});}
 async function setup(e){const res=await worker.fetch(req('/api/account/save',{setupToken:e.RILL_SETUP_TOKEN,config:{jellyfin:{username:'owner',password:'correct-password'},addons:{stream:['https://addon.example/private-provider-key/manifest.json']},keys:{tmdb:'private-tmdb-key'},trackers:{trakt:{clientId:'id',accessToken:'private-tracker-token'}}}}),e);assert.equal(res.status,200);return {cookie:res.headers.get('set-cookie').split(';')[0],data:await res.json()};}
 
@@ -54,7 +54,7 @@ test('owner and Jellyfin sessions revoke on password change and logout-all; norm
  const owner=await readOwner(e),scope=(await sha256(owner.installation_key)).slice(0,32),row=await e.DB.prepare('SELECT config FROM accounts').first();const cfg=await loadConfig(row.config,e,scope);
  const ctx={cfg,env:e,scope,cfgToken:'',origin,lang:'en',tmdbKey:cfg.keys.tmdb};assert.ok(await verifyToken(ctx,bearer));
  const qc=await startQuickConnect(ctx,{client:'test',device:'test',deviceId:'test',version:'1'});assert.ok(await approveQuickConnect(ctx,qc.code));
- const rotated=await worker.fetch(req('/api/account/save',{config:{...data.config,jellyfin:{...data.config.jellyfin,password:'new-password'}}},cookie),e);assert.equal(rotated.status,200);const newCookie=rotated.headers.get('set-cookie').split(';')[0];
+ const rotated=await worker.fetch(req('/api/account/save',{currentPassword:'correct-password',config:{...data.config,jellyfin:{...data.config.jellyfin,password:'new-password'}}},cookie),e);assert.equal(rotated.status,200);const newCookie=rotated.headers.get('set-cookie').split(';')[0];
  assert.equal(await verifyToken(ctx,bearer),null);assert.equal(await claimQuickConnect(ctx,qc.secret),null);
  assert.equal((await worker.fetch(req('/api/account/load',{},cookie),e)).status,401);
  assert.equal((await worker.fetch(req('/Users/AuthenticateByName',{Username:'owner',Pw:'correct-password'}),e)).status,401);
@@ -62,13 +62,16 @@ test('owner and Jellyfin sessions revoke on password change and logout-all; norm
  assert.equal((await worker.fetch(req('/api/account/logout',{},newCookie),e)).status,200);
  assert.equal((await worker.fetch(req('/api/account/load',{},newCookie),e)).status,401);
  const relog=await worker.fetch(req('/api/account/login',{username:'owner',password:'new-password'}),e);assert.equal(relog.status,200);const relogCookie=relog.headers.get('set-cookie').split(';')[0];const fresh=await mintToken(ctx,'user','device');
- assert.equal((await worker.fetch(req('/api/account/logout-all',{},relogCookie),e)).status,200);assert.equal(await verifyToken(ctx,fresh),null);
+ assert.equal((await worker.fetch(req('/api/account/logout-all',{},relogCookie),e)).status,403);assert.ok(await verifyToken(ctx,fresh));
+ assert.equal((await worker.fetch(req('/api/account/logout-all',{currentPassword:'new-password'},relogCookie),e)).status,200);assert.equal(await verifyToken(ctx,fresh),null);
  assert.equal((await worker.fetch(new Request(`${origin}/${data.token}/manifest.json`),e)).status,400);
  e.DB.close();
 });
 test('D1 progressive throttles share owner account across both login paths and IPs; quotas atomic',async()=>{
  const e=env();await setup(e);
  for(let i=0;i<5;i++)assert.equal((await worker.fetch(req('/api/account/login',{username:'owner',password:'wrong'}),e)).status,401);
+ assert.equal((await worker.fetch(req('/api/account/login',{username:'owner',password:'wrong'}),e)).status,429);
+ for(let i=0;i<17;i++)await worker.fetch(req('/Users/AuthenticateByName',{Username:'owner',Pw:'wrong'},'',{'cf-connecting-ip':`198.51.100.${i+1}`}),e);
  const blocked=await worker.fetch(req('/Users/AuthenticateByName',{Username:'owner',Pw:'wrong'},'',{'cf-connecting-ip':'203.0.113.51'}),e);assert.equal(blocked.status,429);assert.ok(Number(blocked.headers.get('retry-after'))>=1);
  const successes=await Promise.all(Array.from({length:8},()=>helperQuota(e,'owner','work',2,3600000)));assert.equal(successes.filter(Boolean).length,2);
  e.DB.close();
@@ -107,7 +110,7 @@ test('legacy owner username remains saveable without renaming',async()=>{
 test('provider artwork URLs are encrypted in image mappings and legacy caches purged',async()=>{
  const {imageTaggedJson,imageUrlByTag,artworkTag}=await import('../src/jellyfin/image-tags.ts');
  const e=env();await ensureSchema(e.DB);
- const url='https://api.ratingposterdb.com/private-rpdb-key/imdb/poster-default/tt123.jpg';const tag=artworkTag(url);
+ const url='https://api.ratingposterdb.com/private-rpdb-key/imdb/poster-default/tt123.jpg';const tag=artworkTag(url,e.RILL_DATA_KEY);
  await e.DB.prepare('INSERT INTO image_tags(tag,url,created) VALUES(?,?,?)').bind(tag,url,0).run();
  await e.DB.prepare('INSERT INTO presentations(key,value,expires) VALUES(?,?,?)').bind('legacy',JSON.stringify({ImageTags:{Primary:url}}),Date.now()+60000).run();
  await migrateSecrets(e);assert.equal((await e.DB.prepare('SELECT count(*) AS n FROM image_tags').first()).n,0);assert.equal((await e.DB.prepare('SELECT count(*) AS n FROM presentations').first()).n,0);

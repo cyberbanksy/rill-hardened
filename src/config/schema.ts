@@ -57,7 +57,7 @@ export interface RillConfig {
   ageCap: string;
   advanced: boolean;
   thirdParty?: {letterboxd:boolean};
-  jellyfin: { username: string; password: string; maxSources: number; home: Array<'resume' | 'nextup' | 'latest' | 'upcoming'>; profiles?: JellyfinProfile[]; collections?: JellyfinCollection[] };
+  jellyfin: { username: string; password: string; maxSources: number; torrentServer?: string; home: Array<'resume' | 'nextup' | 'latest' | 'upcoming'>; profiles?: JellyfinProfile[]; collections?: JellyfinCollection[] };
   search: { providers: Array<'tmdb' | 'tvdb' | 'mal' | 'anilist' | 'kitsu' | 'cinemeta'>; includeAdult: boolean };
 }
 
@@ -118,6 +118,10 @@ export function normalizeConfig(input: unknown): RillConfig {
     seenProfiles.add(p.id); seenNames.add(p.name.trim().toLowerCase()); return true;
   }).map(p => ({ id:p.id,name:p.name.trim(),sharesHistory:p.sharesHistory === true,avatar:typeof p.avatar === 'string' && /^https?:\/\//i.test(p.avatar) ? p.avatar : undefined,ageCap:typeof p.ageCap === 'string' ? p.ageCap : undefined,catalogs:arr(p.catalogs) }));
   cfg.jellyfin.maxSources = Math.max(1, Math.min(200, Number(cfg.jellyfin.maxSources) || 30));
+  // Apps play torrent results through this Stremio streaming server. Rill only redirects to it.
+  const torrentServer = url(src.jellyfin?.torrentServer)?.replace(/\/+$/, '');
+  if (torrentServer && /^https?:\/\/[^/@]+(\/[^?#]*)?$/i.test(torrentServer)) cfg.jellyfin.torrentServer = torrentServer;
+  else delete cfg.jellyfin.torrentServer;
   cfg.jellyfin.collections = collectionsOf(src.jellyfin?.collections, seenProfiles);
   cfg.search = { ...cfg.search, ...(src.search ?? {}) };
   return cfg;

@@ -6,7 +6,8 @@ import type { Env } from '../env';
 import { collectionOf, normalizeConfig, type RillConfig } from '../config/schema';
 import { DECADES, FRANCHISES, NETWORKS, STUDIOS, dedupe } from '../jellyfin/curated';
 import { decodeConfig, encodeConfig } from '../config/codec';
-import { getManifest } from '../stremio/client';
+import { externalStreams, getManifest, type StreamReport } from '../stremio/client';
+import { playableUrl } from '../jellyfin/playback';
 import { sha256 } from '../util/bytes';
 import { listCatalogDefinitions, defaultCatalogEnabled, catalogSource } from '../addon/catalogs';
 import { renderPage, renderLogo, pagePolicy } from './page';
@@ -272,6 +273,22 @@ uiRouter.post('/api/probe', async (c) => {
   const manifest = await getManifest(url);
   if (!manifest) return c.json({ error: 'No manifest found at that address.' }, 502);
   const resources = (manifest.resources || []).map((r) => (typeof r === 'string' ? r : r.name));
+  // Optional stream check for one title, e.g. {type:'movie', id:'tt0063350'}. Counts only:
+  // stream URLs can carry debrid keys and never leave the server.
+  const type = field(body,'type'), id = field(body,'id');
+  let streams: (StreamReport & { playable: number; torrentOnly: number; needsHeaders: number; other: number }) | undefined;
+  if ((type === 'movie' || type === 'series') && /^[a-z0-9:._-]{1,64}$/i.test(id)) {
+    const cfg = c.get('ownerCfg');
+    const ctx = await buildCtx({ ...cfg, addons: { ...cfg.addons, stream: [url] } }, c.env, new URL(c.req.url).origin);
+    const report: StreamReport = { addons: 0, asked: 0, failed: 0, streams: 0 };
+    const found = await externalStreams(ctx, type, id, type, report).catch(() => []);
+    const counts = { playable: 0, torrentOnly: 0, needsHeaders: 0, other: 0 };
+    for (const s of found) {
+      const result = playableUrl(s, cfg.jellyfin.torrentServer);
+      if (result === 'torrent') counts.torrentOnly++; else if (result === 'headers') counts.needsHeaders++; else if (result === 'other') counts.other++; else counts.playable++;
+    }
+    streams = { ...report, ...counts };
+  }
   return c.json({
     id: manifest.id,
     name: manifest.name,
@@ -280,6 +297,7 @@ uiRouter.post('/api/probe', async (c) => {
     types: manifest.types || [],
     catalogs: (manifest.catalogs || []).length,
     idPrefixes: manifest.idPrefixes || [],
+    ...(streams ? { streams } : {}),
   });
 });
 

@@ -48,10 +48,30 @@ type Policy = {
     fetcher?: typeof fetch;
     maxBytes?: number;
 };
+// Validated answers per isolate. Each lookup is two subrequests, and the free plan allows 50 per
+// invocation, so uncached lookups starved stream add-ons. Caching doesn't widen the rebinding gap
+// documented in HARDENING.md: fetch() already resolves the name again after the check.
+const DNS_MIN_TTL = 30_000, DNS_MAX_TTL = 300_000;
+const resolved = new Map<string, { addresses: string[]; expires: number }>();
 async function resolvePublic(host: string): Promise<string[]> {
     if (host.includes(':') || /^[\d.]+$/.test(host))
         return [host];
+    const hit = resolved.get(host);
+    if (hit && hit.expires > Date.now())
+        return hit.addresses;
+    resolved.delete(host);
+    const { addresses, ttl } = await lookup(host);
+    if (addresses.length && addresses.every(publicIp)) {
+        if (resolved.size >= 256)
+            resolved.delete(resolved.keys().next().value!);
+        resolved.set(host, { addresses, expires: Date.now() + Math.min(DNS_MAX_TTL, Math.max(DNS_MIN_TTL, ttl * 1000)) });
+    }
+    return addresses;
+}
+export function forgetResolvedHosts(): void { resolved.clear(); }
+async function lookup(host: string): Promise<{ addresses: string[]; ttl: number }> {
     const addresses: string[] = [];
+    let ttl = Infinity;
     for (const type of ['A', 'AAAA']) {
         // Fixed HTTPS resolver bootstrap; never accepts a caller-supplied resolver URL.
         // Workers reject redirect: 'error'; with 'manual' a 3xx is not ok and fails below.
@@ -63,15 +83,18 @@ async function resolvePublic(host: string): Promise<string[]> {
             Answer?: Array<{
                 type: number;
                 data: string;
+                TTL?: number;
             }>;
         }>(res, 65536);
         if (data.Status !== 0)
             throw Error('DNS lookup failed');
         for (const a of data.Answer ?? [])
-            if (a.type === 1 || a.type === 28)
+            if (a.type === 1 || a.type === 28) {
                 addresses.push(a.data);
+                ttl = Math.min(ttl, Number(a.TTL) || 0);
+            }
     }
-    return addresses;
+    return { addresses, ttl: Number.isFinite(ttl) ? ttl : 0 };
 }
 export async function safeFetch(raw: string, init: RequestInit = {}, policy: Policy = {}): Promise<Response> {
     const fetcher = policy.fetcher ?? fetch;

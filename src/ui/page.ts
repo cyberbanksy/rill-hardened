@@ -808,6 +808,7 @@ function body(): string {
     <div class="f"><label class="t" for="jf-pass">New password</label><input type="password" id="jf-pass" placeholder="Leave blank to keep your password" autocomplete="new-password" minlength="12"></div>
     <div class="f"><label class="t" for="jf-current">Current password</label><input type="password" id="jf-current" placeholder="Needed to change your sign-in" autocomplete="current-password"></div>
     <div class="f"><label class="t" for="jf-max">Max sources per title</label><input type="number" id="jf-max" data-k="jellyfin.maxSources" min="1" max="200"></div>
+    <div class="f"><label class="t" for="jf-torrent">Torrent streaming server</label><input type="url" id="jf-torrent" data-k="jellyfin.torrentServer" placeholder="Optional, e.g. http://192.168.1.10:11470" autocomplete="off" spellcheck="false"></div>
   </div>
   <div class="row"><div class="f" style="flex:0"><button type="button" id="jf-credentials">Update sign-in</button></div><div class="f"><p class="status" id="jf-cred-status" role="alert"></p></div></div>
   <div class="row"><div class="f"><label class="t" for="qc-code">Quick Connect code</label><input type="text" id="qc-code" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="Shown by the Jellyfin app"></div><div class="f" style="flex:0"><button type="button" id="qc-approve">Approve</button></div></div>
